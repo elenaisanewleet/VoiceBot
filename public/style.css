@@ -105,16 +105,16 @@ body {
 
 .sheet {
   width: 100%;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
-  min-height: 140px;
 }
 
 .text {
   width: 100%;
-  flex: 1;
-  min-height: 120px;
+  height: 38vh;
+  min-height: 132px;
+  max-height: 340px;
   padding: 14px;
   border: 0;
   border-radius: var(--radius);
@@ -177,6 +177,7 @@ body {
 
 .settings {
   width: 100%;
+  margin-top: auto; /* настройки прижаты к низу, свободное место — над ними */
   background: var(--card);
   border-radius: var(--radius);
   padding: 4px 14px;
@@ -208,9 +209,10 @@ body {
 .pill {
   border: 0;
   border-radius: 999px;
-  padding: 6px 11px;
+  padding: 7px 12px;
   font: inherit;
   font-size: 13px;
+  white-space: nowrap;
   background: color-mix(in srgb, var(--muted) 18%, transparent);
   color: var(--fg);
   cursor: pointer;
