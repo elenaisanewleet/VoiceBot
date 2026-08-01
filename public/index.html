@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>Говорить</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <main class="app">
+      <div class="status" id="status" role="status" aria-live="polite">Нажмите и говорите</div>
+
+      <button class="mic" id="mic" aria-label="Начать запись">
+        <span class="mic__ring" id="ring"></span>
+        <svg class="mic__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"
+            fill="currentColor"
+          />
+          <path
+            d="M18.5 11.5a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20h-2a.9.9 0 0 0 0 1.8h5.8a.9.9 0 0 0 0-1.8h-2v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"
+            fill="currentColor"
+          />
+        </svg>
+      </button>
+
+      <section class="sheet">
+        <textarea
+          id="text"
+          class="text"
+          placeholder="Здесь появится ваш текст — уже с пунктуацией. Можно поправить перед отправкой."
+          spellcheck="true"
+        ></textarea>
+        <div class="text__foot">
+          <span id="hint" class="hint"></span>
+          <button id="clear" class="linkbtn" type="button">Очистить</button>
+        </div>
+      </section>
+
+      <section class="settings" id="settings">
+        <div class="row">
+          <span class="row__label">Стиль</span>
+          <div class="pills" id="styles" role="radiogroup" aria-label="Стиль текста">
+            <button type="button" class="pill" data-style="raw" role="radio">как сказано</button>
+            <button type="button" class="pill" data-style="clean" role="radio">грамотно</button>
+            <button type="button" class="pill" data-style="formal" role="radio">по-деловому</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="row__label" for="lang">Язык</label>
+          <select id="lang" class="select">
+            <option value="">определить сам</option>
+            <option value="ru">русский</option>
+            <option value="en">english</option>
+            <option value="uk">українська</option>
+            <option value="de">deutsch</option>
+            <option value="fr">français</option>
+            <option value="es">español</option>
+            <option value="tr">türkçe</option>
+            <option value="kk">қазақша</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label class="row__label" for="autosend">Отправлять сразу после паузы</label>
+          <input type="checkbox" id="autosend" class="switch" />
+        </div>
+      </section>
+
+      <p class="error" id="error" hidden></p>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

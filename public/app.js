@@ -1,0 +1,563 @@
+/**
+ * Mini App: микрофон → грамотный текст → сообщение в тот же чат.
+ *
+ * Почему именно так:
+ *  • Telegram-бот не имеет доступа к микрофону — доступ есть только у веб-страницы
+ *    внутри Telegram, то есть у Mini App.
+ *  • Mini App открывается кнопкой из inline-режима (@бот в любом чате), поэтому
+ *    Telegram кладёт в initData query_id, а бот через answerWebAppQuery кладёт
+ *    готовый текст ровно в тот чат, откуда всё началось. Обычным текстовым
+ *    сообщением от имени пользователя, без голосовых и без прав в чате.
+ */
+
+const tg = window.Telegram?.WebApp
+
+const el = {
+  status: document.getElementById('status'),
+  mic: document.getElementById('mic'),
+  ring: document.getElementById('ring'),
+  text: document.getElementById('text'),
+  hint: document.getElementById('hint'),
+  clear: document.getElementById('clear'),
+  styles: document.getElementById('styles'),
+  lang: document.getElementById('lang'),
+  autosend: document.getElementById('autosend'),
+  error: document.getElementById('error'),
+}
+
+// ── настройки ───────────────────────────────────────────────────────────────
+
+const DEFAULTS = { style: 'clean', lang: 'ru', autosend: false }
+const SETTINGS_KEY = '139bot.settings'
+
+const settings = (() => {
+  try {
+    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }
+  } catch {
+    return { ...DEFAULTS }
+  }
+})()
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  } catch {
+    /* приватный режим — переживём */
+  }
+}
+
+// ── состояние ───────────────────────────────────────────────────────────────
+
+const state = {
+  recording: false,
+  starting: false,
+  busy: false,
+  pending: 0, // сколько кусков ещё распознаётся
+  sending: false,
+}
+
+// ── мелкие утилиты ──────────────────────────────────────────────────────────
+
+const haptic = (kind = 'impact', style = 'medium') => {
+  try {
+    if (kind === 'impact') tg?.HapticFeedback?.impactOccurred(style)
+    else tg?.HapticFeedback?.notificationOccurred(style)
+  } catch {
+    /* не критично */
+  }
+}
+
+function showError(message) {
+  el.error.textContent = message
+  el.error.hidden = !message
+}
+
+function setStatus(text, live = false) {
+  el.status.textContent = text
+  el.status.classList.toggle('is-live', live)
+}
+
+function setHint(text, working = false) {
+  el.hint.textContent = text
+  el.hint.classList.toggle('is-working', working)
+}
+
+const MAX_LEN = 4096
+
+function currentText() {
+  return el.text.value.trim()
+}
+
+function syncMainButton() {
+  if (!tg?.MainButton) return
+  const text = currentText()
+  if (text && !state.recording) {
+    tg.MainButton.setText(state.sending ? 'Отправляю…' : 'Отправить')
+    tg.MainButton.show()
+    if (state.sending || state.busy) tg.MainButton.disable()
+    else tg.MainButton.enable()
+  } else {
+    tg.MainButton.hide()
+  }
+  if (text.length > MAX_LEN) {
+    showError(`Слишком длинно: ${text.length} из ${MAX_LEN} символов. Отправится первая часть.`)
+  }
+}
+
+function appendPhrase(phrase) {
+  if (!phrase) return
+  const existing = el.text.value
+  const needsSpace = existing && !/\s$/.test(existing)
+  el.text.value = existing + (needsSpace ? ' ' : '') + phrase
+  el.text.scrollTop = el.text.scrollHeight
+  syncMainButton()
+}
+
+// ── сеть ────────────────────────────────────────────────────────────────────
+
+const initData = tg?.initData || ''
+
+async function api(path, { body, headers = {}, raw = false } = {}) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: raw ? { 'x-init-data': initData, ...headers } : { 'content-type': 'application/json' },
+    body: raw ? body : JSON.stringify({ initData, ...body }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || data.reason || `HTTP ${res.status}`)
+  return data
+}
+
+const transcribeSegment = (blob) =>
+  api(`/api/stt?lang=${encodeURIComponent(settings.lang)}&style=raw`, {
+    raw: true,
+    body: blob,
+    headers: { 'content-type': blob.type || 'audio/webm' },
+  })
+
+// ── упорядоченная очередь распознанных кусков ───────────────────────────────
+// Куски уезжают на распознавание параллельно и могут вернуться вразнобой,
+// поэтому вставляем их в текст строго в порядке произнесения.
+
+const queue = { next: 0, ready: new Map() }
+
+function deliver(index, text) {
+  if (index < queue.next) return // кусок от очищенной сессии — выбрасываем
+  queue.ready.set(index, text)
+  while (queue.ready.has(queue.next)) {
+    appendPhrase(queue.ready.get(queue.next))
+    queue.ready.delete(queue.next)
+    queue.next++
+  }
+}
+
+// ── запись с определением пауз ──────────────────────────────────────────────
+
+const SILENCE_MS = 700 // столько тишины считаем концом фразы
+const MIN_SPEECH_MS = 350 // короче — это кашель, а не фраза
+const MAX_SEGMENT_MS = 7000 // длинный монолог режем, чтобы текст шёл на глазах
+const IDLE_RESTART_MS = 10_000 // молчим — не копим пустой файл
+const AUTOSEND_AFTER_MS = 1400 // пауза, после которой авторежим отправляет
+
+const MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+  'audio/mp4',
+  'audio/aac',
+]
+
+function pickMime() {
+  if (typeof MediaRecorder === 'undefined') return null
+  for (const mime of MIME_CANDIDATES) {
+    if (MediaRecorder.isTypeSupported?.(mime)) return mime
+  }
+  return ''
+}
+
+const rec = {
+  stream: null,
+  ctx: null,
+  analyser: null,
+  buffer: null,
+  recorder: null,
+  chunks: [],
+  timer: null,
+  mime: null,
+  segmentIndex: 0,
+  segmentStart: 0,
+  speechMs: 0,
+  lastVoiceAt: 0,
+  floor: 0.006,
+  calibrateUntil: 0,
+}
+
+async function startRecording() {
+  if (state.recording || state.starting) return
+  showError('')
+  const mime = pickMime()
+  if (!navigator.mediaDevices?.getUserMedia || mime === null) {
+    showError('Этот клиент не даёт доступ к микрофону. Пришлите голосовое в чат с ботом — я расшифрую.')
+    return
+  }
+
+  // Разрешение спрашивается асинхронно — до ответа кнопка не должна повторно стрелять.
+  state.starting = true
+  el.mic.classList.add('is-busy')
+  try {
+    rec.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    })
+  } catch (err) {
+    showError(
+      err.name === 'NotAllowedError'
+        ? 'Микрофон запрещён. Разрешите Telegram доступ к микрофону в настройках телефона и откройте заново.'
+        : 'Микрофон недоступен: ' + err.message,
+    )
+    return
+  } finally {
+    state.starting = false
+    el.mic.classList.remove('is-busy')
+  }
+
+  rec.mime = mime
+  const Ctx = window.AudioContext || window.webkitAudioContext
+  rec.ctx = new Ctx()
+  if (rec.ctx.state === 'suspended') await rec.ctx.resume()
+  rec.analyser = rec.ctx.createAnalyser()
+  rec.analyser.fftSize = 1024
+  rec.buffer = new Uint8Array(rec.analyser.fftSize)
+  rec.ctx.createMediaStreamSource(rec.stream).connect(rec.analyser)
+
+  rec.floor = 0.006
+  rec.calibrateUntil = performance.now() + 500
+  state.recording = true
+
+  el.mic.classList.add('is-recording')
+  el.mic.setAttribute('aria-label', 'Остановить запись')
+  setStatus('Слушаю — говорите', true)
+  setHint('')
+  haptic('impact', 'medium')
+  tg?.enableClosingConfirmation?.()
+  syncMainButton()
+
+  startSegment()
+  rec.timer = setInterval(tick, 50)
+}
+
+function startSegment() {
+  rec.chunks = []
+  rec.speechMs = 0
+  rec.segmentStart = performance.now()
+  rec.lastVoiceAt = 0
+
+  try {
+    rec.recorder = rec.mime
+      ? new MediaRecorder(rec.stream, { mimeType: rec.mime })
+      : new MediaRecorder(rec.stream)
+  } catch {
+    rec.recorder = new MediaRecorder(rec.stream)
+  }
+
+  const index = rec.segmentIndex++
+  const chunks = rec.chunks
+  let hadSpeech = false
+
+  // Резолвится, когда браузер отдал последний кусок данных. Без этого
+  // «стоп» мог отработать раньше, чем приедет последняя фраза.
+  let settle
+  rec.segmentDone = new Promise((resolve) => {
+    settle = resolve
+  })
+
+  rec.recorder.ondataavailable = (e) => e.data?.size && chunks.push(e.data)
+  rec.recorder.onstop = () => {
+    if (hadSpeech && chunks.length) {
+      uploadSegment(index, new Blob(chunks, { type: rec.mime || chunks[0].type }))
+    } else {
+      deliver(index, '') // держим порядок очереди
+    }
+    settle()
+  }
+  rec.recorder.onerror = (e) => {
+    console.error('recorder', e)
+    deliver(index, '')
+    settle()
+  }
+
+  // hadSpeech фиксируем в момент остановки — к тому времени tick уже посчитал.
+  rec.markSpeech = () => {
+    hadSpeech = true
+  }
+  rec.recorder.start()
+}
+
+function cutSegment({ restart = true } = {}) {
+  const recorder = rec.recorder
+  const done = rec.segmentDone
+  rec.recorder = null
+  rec.segmentDone = null
+
+  let waiter = Promise.resolve()
+  if (recorder && recorder.state !== 'inactive') {
+    if (rec.speechMs >= MIN_SPEECH_MS) rec.markSpeech?.()
+    recorder.stop()
+    waiter = done || waiter
+  }
+
+  if (restart && state.recording) startSegment()
+  return waiter
+}
+
+async function uploadSegment(index, blob) {
+  state.pending++
+  setHint('распознаю', true)
+  syncMainButton()
+  try {
+    const { raw } = await transcribeSegment(blob)
+    deliver(index, (raw || '').trim())
+  } catch (err) {
+    console.error('stt', err)
+    deliver(index, '')
+    showError('Кусок не распознался: ' + err.message)
+  } finally {
+    state.pending--
+    if (state.pending === 0) {
+      setHint('')
+      if (!state.recording) finalize()
+    }
+    syncMainButton()
+  }
+}
+
+function tick() {
+  const now = performance.now()
+  rec.analyser.getByteTimeDomainData(rec.buffer)
+
+  let sum = 0
+  for (let i = 0; i < rec.buffer.length; i++) {
+    const v = (rec.buffer[i] - 128) / 128
+    sum += v * v
+  }
+  const rms = Math.sqrt(sum / rec.buffer.length)
+
+  // Первые полсекунды слушаем фон, чтобы порог подстроился под комнату.
+  if (now < rec.calibrateUntil) {
+    rec.floor = Math.min(rec.floor, Math.max(rms, 0.002))
+    el.ring.style.transform = 'scale(1)'
+    return
+  }
+
+  const threshold = Math.max(0.012, rec.floor * 2.5)
+  const speaking = rms > threshold
+
+  el.ring.style.transform = `scale(${(1 + Math.min(rms * 5, 0.75)).toFixed(3)})`
+
+  if (speaking) {
+    rec.speechMs += 50
+    rec.lastVoiceAt = now
+  }
+
+  const sinceVoice = rec.lastVoiceAt ? now - rec.lastVoiceAt : now - rec.segmentStart
+  const enough = rec.speechMs >= MIN_SPEECH_MS
+
+  if (enough && !speaking && sinceVoice >= SILENCE_MS) {
+    cutSegment()
+    maybeAutosend()
+    return
+  }
+  if (rec.speechMs >= MAX_SEGMENT_MS) {
+    cutSegment()
+    return
+  }
+  if (!enough && now - rec.segmentStart >= IDLE_RESTART_MS) {
+    cutSegment() // тишина — перезапускаем сегмент, чтобы не копить пустоту
+  }
+}
+
+let autosendTimer = null
+
+function maybeAutosend() {
+  if (!settings.autosend) return
+  clearTimeout(autosendTimer)
+  autosendTimer = setTimeout(async () => {
+    if (!settings.autosend || !state.recording) return
+    if (state.pending > 0 || !currentText()) return
+    await stopRecording()
+    await send()
+  }, AUTOSEND_AFTER_MS)
+}
+
+async function stopRecording() {
+  if (!state.recording) return
+  state.recording = false
+  clearInterval(rec.timer)
+  clearTimeout(autosendTimer)
+  await cutSegment({ restart: false })
+
+  rec.stream?.getTracks().forEach((t) => t.stop())
+  try {
+    await rec.ctx?.close()
+  } catch {
+    /* уже закрыт */
+  }
+  rec.stream = null
+  rec.ctx = null
+
+  el.mic.classList.remove('is-recording')
+  el.mic.setAttribute('aria-label', 'Начать запись')
+  el.ring.style.transform = 'scale(1)'
+  setStatus(currentText() || state.pending ? 'Готово — проверьте и отправьте' : 'Нажмите и говорите')
+  haptic('impact', 'light')
+  tg?.disableClosingConfirmation?.()
+  syncMainButton()
+
+  if (state.pending === 0) await finalize()
+}
+
+/** Причёсываем накопленный текст один раз — так дешевле и связнее, чем по фразам. */
+async function finalize() {
+  if (state.busy) return // уже причёсываем — второй раз не надо
+  const text = currentText()
+  if (!text || settings.style === 'raw') {
+    syncMainButton()
+    return
+  }
+  state.busy = true
+  setHint('привожу в порядок', true)
+  syncMainButton()
+  try {
+    const { text: polished } = await api('/api/polish', { body: { text, style: settings.style } })
+    if (polished && polished !== text) el.text.value = polished
+    setHint('готово')
+  } catch (err) {
+    console.error('polish', err)
+    setHint('')
+  } finally {
+    state.busy = false
+    syncMainButton()
+  }
+}
+
+// ── отправка ────────────────────────────────────────────────────────────────
+
+async function send() {
+  const text = currentText().slice(0, MAX_LEN)
+  if (!text || state.sending) return
+
+  state.sending = true
+  syncMainButton()
+  tg?.MainButton?.showProgress?.(true)
+
+  try {
+    const result = await api('/api/send', { body: { text } })
+    if (result.sent) {
+      haptic('notification', 'success')
+      tg?.close?.()
+      return
+    }
+    // Прямая отправка возможна только когда Mini App открыт из inline-режима.
+    // Иначе — просим Telegram показать выбор чата с уже готовым текстом.
+    if (result.needsChatPick) {
+      if (tg?.switchInlineQuery && tg.isVersionAtLeast?.('6.7')) {
+        tg.switchInlineQuery(result.query, ['users', 'groups', 'channels'])
+      } else {
+        showError(
+          'Отправить отсюда не получилось. Наберите @бота в нужном чате и нажмите «🎙 Говорить» — ' +
+            'тогда текст уйдёт прямо в этот чат.',
+        )
+      }
+    }
+  } catch (err) {
+    console.error('send', err)
+    haptic('notification', 'error')
+    showError('Не удалось отправить: ' + err.message)
+  } finally {
+    state.sending = false
+    tg?.MainButton?.hideProgress?.()
+    syncMainButton()
+  }
+}
+
+// ── интерфейс ───────────────────────────────────────────────────────────────
+
+el.mic.addEventListener('click', () => {
+  if (state.recording) stopRecording()
+  else startRecording()
+})
+
+el.text.addEventListener('input', syncMainButton)
+
+el.clear.addEventListener('click', () => {
+  el.text.value = ''
+  // Куски, уехавшие на распознавание до очистки, уже неактуальны:
+  // сдвигаем очередь вперёд, и deliver() их отбросит.
+  queue.next = rec.segmentIndex
+  queue.ready.clear()
+  showError('')
+  setHint('')
+  setStatus(state.recording ? 'Слушаю — говорите' : 'Нажмите и говорите', state.recording)
+  syncMainButton()
+})
+
+el.styles.addEventListener('click', (e) => {
+  const button = e.target.closest('[data-style]')
+  if (!button) return
+  settings.style = button.dataset.style
+  saveSettings()
+  renderSettings()
+  haptic('impact', 'light')
+})
+
+el.lang.addEventListener('change', () => {
+  settings.lang = el.lang.value
+  saveSettings()
+})
+
+el.autosend.addEventListener('change', () => {
+  settings.autosend = el.autosend.checked
+  saveSettings()
+  setStatus(
+    settings.autosend
+      ? 'Авторежим: договорили — сообщение ушло'
+      : state.recording
+        ? 'Слушаю — говорите'
+        : 'Нажмите и говорите',
+    state.recording,
+  )
+})
+
+function renderSettings() {
+  for (const pill of el.styles.querySelectorAll('[data-style]')) {
+    const active = pill.dataset.style === settings.style
+    pill.classList.toggle('is-active', active)
+    pill.setAttribute('aria-checked', String(active))
+  }
+  el.lang.value = settings.lang
+  el.autosend.checked = settings.autosend
+}
+
+// ── старт ───────────────────────────────────────────────────────────────────
+
+function init() {
+  renderSettings()
+
+  if (!tg) {
+    showError('Откройте это через Telegram — снаружи микрофон в чат не отправишь.')
+    return
+  }
+
+  tg.ready()
+  tg.expand?.()
+  tg.setHeaderColor?.('secondary_bg_color')
+  tg.MainButton.onClick(send)
+  tg.onEvent?.('themeChanged', () => {})
+
+  if (!initData) {
+    showError('Telegram не передал данные запуска. Закройте и откройте окно заново.')
+  }
+
+  syncMainButton()
+}
+
+init()
