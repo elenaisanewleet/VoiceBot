@@ -13,14 +13,33 @@ export class TelegramError extends Error {
   }
 }
 
+const UNREACHABLE =
+  'api.telegram.org не отвечает так, как должен. Обычно это сеть: провайдер ' +
+  'блокирует Telegram или нужен VPN'
+
 export async function call(method, payload = {}, { timeoutMs = 30_000 } = {}) {
-  const res = await fetch(`${API()}/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
-  })
-  const data = await res.json().catch(() => ({ ok: false, description: 'некорректный JSON от Telegram' }))
+  let res
+  try {
+    res = await fetch(`${API()}/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+  } catch (err) {
+    throw new TelegramError(method, `${UNREACHABLE} (${err.name === 'TimeoutError' ? 'таймаут' : err.message})`, 0)
+  }
+
+  // Между нами и Telegram может оказаться прокси или заглушка провайдера —
+  // тогда вместо JSON придёт HTML, и разбор упадёт непонятной ошибкой.
+  const body = await res.text()
+  let data
+  try {
+    data = JSON.parse(body)
+  } catch {
+    throw new TelegramError(method, `${UNREACHABLE} (HTTP ${res.status})`, res.status)
+  }
+
   if (!data.ok) throw new TelegramError(method, data.description, data.error_code ?? res.status)
   return data.result
 }

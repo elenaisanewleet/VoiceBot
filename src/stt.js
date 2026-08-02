@@ -44,11 +44,23 @@ export async function transcribe(audio, { mime = 'audio/webm', lang } = {}) {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`распознавание не удалось: HTTP ${res.status} ${detail.slice(0, 300)}`)
+    throw new Error(describeApiError(res.status, detail))
   }
 
   const data = await res.json()
   return (data.text || '').trim()
+}
+
+/** Понятная причина вместо голого номера ошибки — их видит обычный человек. */
+function describeApiError(status, detail = '') {
+  if (status === 401 || status === 403) {
+    return 'ключ распознавания не принят — проверьте STT_API_KEY в .env'
+  }
+  if (status === 429) {
+    return 'слишком часто: бесплатный тариф ограничивает число запросов. Подождите минуту и продолжайте'
+  }
+  if (status === 413) return 'кусок записи слишком большой'
+  return `распознавание не удалось (HTTP ${status}) ${detail.slice(0, 200)}`
 }
 
 const STYLE_RULES = {
@@ -66,6 +78,31 @@ const STYLE_RULES = {
 }
 
 export const STYLES = Object.keys(STYLE_RULES)
+
+/**
+ * Рассуждающие модели (gpt-oss, qwen3 и прочие) любят приложить ход мыслей
+ * и обернуть ответ в кавычки. В сообщение это попасть не должно.
+ */
+export function stripThinking(text = '') {
+  let out = String(text)
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\|[^|]*\|>/g, '')
+    .trim()
+  // Снимаем кавычки, только если они обрамляют весь ответ целиком.
+  const pairs = [
+    ['"', '"'],
+    ['«', '»'],
+    ['“', '”'],
+  ]
+  for (const [open, close] of pairs) {
+    if (out.startsWith(open) && out.endsWith(close) && out.length > 1) {
+      const inner = out.slice(1, -1)
+      if (!inner.includes(close)) out = inner.trim()
+      break
+    }
+  }
+  return out
+}
 
 /**
  * Сырая расшифровка → грамотный текст.
@@ -104,7 +141,7 @@ export async function polish(text, { style = 'clean' } = {}) {
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
-    const out = (data.choices?.[0]?.message?.content || '').trim()
+    const out = stripThinking(data.choices?.[0]?.message?.content || '')
     if (!out) throw new Error('пустой ответ')
     // Страховка от «модель разговорилась»: если ответ подозрительно длиннее
     // исходника, значит она не отредактировала, а сочинила — берём оригинал.
