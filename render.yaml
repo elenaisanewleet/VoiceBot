@@ -1,0 +1,44 @@
+# Развёртывание на Render одной кнопкой: New → Blueprint → выбрать этот репозиторий.
+# Бесплатный план, карта не нужна.
+services:
+  - type: web
+    name: 139bot
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: node src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+
+      # На хостинге бот работает через вебхук, а не через опрос.
+      - key: USE_WEBHOOK
+        value: 'true'
+
+      # Бесплатный инстанс засыпает после 15 минут тишины и потом просыпается
+      # почти минуту — Mini App столько ждать не может. Сервис будит себя сам.
+      - key: KEEPALIVE
+        value: 'true'
+
+      # PUBLIC_URL не задаём: Render сам подставляет RENDER_EXTERNAL_URL.
+
+      # Распознавание и редактура. Бесплатный тариф Groq, карта не нужна.
+      - key: STT_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: STT_MODEL
+        value: whisper-large-v3-turbo
+      - key: LLM_MODEL
+        value: openai/gpt-oss-120b
+      - key: DEFAULT_LANG
+        value: ru
+      - key: DEFAULT_STYLE
+        value: clean
+
+      # Эти два значения вводятся в интерфейсе Render при создании сервиса
+      # и в репозиторий не попадают.
+      - key: BOT_TOKEN
+        sync: false
+      - key: STT_API_KEY
+        sync: false

@@ -31,7 +31,12 @@ loadDotEnv()
 const bool = (v, fallback = false) =>
   v === undefined ? fallback : ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase())
 
-const publicUrl = (process.env.PUBLIC_URL || '').replace(/\/+$/, '')
+// На хостингах публичный адрес известен самой платформе — не заставляем
+// вписывать его руками. RENDER_EXTERNAL_URL подставляет Render.
+const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(
+  /\/+$/,
+  '',
+)
 
 export const config = {
   botToken: process.env.BOT_TOKEN || '',
@@ -59,6 +64,12 @@ export const config = {
 
   useWebhook: bool(process.env.USE_WEBHOOK, false),
   maxAudioBytes: Number(process.env.MAX_AUDIO_BYTES || 20 * 1024 * 1024),
+
+  // Бесплатные хостинги усыпляют сервис после нескольких минут тишины, и первый
+  // запрос потом ждёт около минуты — для Mini App это приговор. Сервис сам
+  // дёргает свой /health, чтобы не заснуть.
+  keepAlive: bool(process.env.KEEPALIVE, false),
+  keepAliveMinutes: Number(process.env.KEEPALIVE_MINUTES || 10),
 }
 
 // Путь вебхука не должен быть угадываемым: либо задан явно, либо выводится из токена.

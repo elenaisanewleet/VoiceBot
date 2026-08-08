@@ -45,10 +45,27 @@ async function webhook() {
   console.log(`[bot] режим: webhook → ${config.publicUrl}/webhook/***`)
 }
 
+/**
+ * Не даём бесплатному хостингу усыпить сервис: раз в несколько минут дёргаем
+ * собственный /health через публичный адрес. Для платного инстанса не нужно —
+ * включается переменной KEEPALIVE.
+ */
+function startKeepAlive() {
+  const everyMs = Math.max(1, config.keepAliveMinutes) * 60_000
+  console.log(`[bot] не засыпаю: пингую себя раз в ${config.keepAliveMinutes} мин`)
+  const timer = setInterval(() => {
+    fetch(`${config.publicUrl}/health`, { signal: AbortSignal.timeout(20_000) }).catch((err) =>
+      console.warn('[keepalive]', err.message),
+    )
+  }, everyMs)
+  timer.unref()
+}
+
 async function main() {
   assertConfig()
   startServer()
   await bootstrap()
+  if (config.keepAlive) startKeepAlive()
   if (config.useWebhook) await webhook()
   else await longPolling()
 }
