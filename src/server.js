@@ -127,6 +127,38 @@ export async function handleRequest(req, res) {
     }
   }
 
+  // ── что думает Telegram о нашем вебхуке ───────────────────────────────────
+  // Когда «ничего не работает», почти всегда виноват вебхук, и Telegram сам
+  // хранит причину последней неудачи. Открывается в браузере.
+  if (path === '/api/status') {
+    const hideSecret = (u) => (u ? u.replace(/(\/api\/webhook\/).*/, '$1***') : '(не задан)')
+    try {
+      const [me, hook] = await Promise.all([tg.getMe(), tg.call('getWebhookInfo')])
+      const expected = config.publicUrl + config.webhookPath
+      const when = (ts) => (ts ? new Date(ts * 1000).toISOString() : '—')
+      const lines = [
+        `бот:                 @${me.username}`,
+        `адрес приложения:    ${config.publicUrl}`,
+        `вебхук у Telegram:   ${hideSecret(hook.url)}`,
+        `совпадает с нашим:   ${hook.url === expected ? 'да' : 'НЕТ — откройте /api/setup'}`,
+        `ждут обработки:      ${hook.pending_update_count ?? 0}`,
+        `типы обновлений:     ${(hook.allowed_updates || ['(все)']).join(', ')}`,
+        `inline-запросы:      ${
+          !hook.allowed_updates || hook.allowed_updates.includes('inline_query')
+            ? 'разрешены'
+            : 'НЕ разрешены — откройте /api/setup'
+        }`,
+        `последняя ошибка:    ${hook.last_error_message || 'нет'}`,
+        `когда:               ${when(hook.last_error_date)}`,
+      ]
+      return send(res, 200, lines.join('\n'), { 'content-type': 'text/plain; charset=utf-8' })
+    } catch (err) {
+      return send(res, 500, 'Не получилось: ' + err.message, {
+        'content-type': 'text/plain; charset=utf-8',
+      })
+    }
+  }
+
   // ── Telegram webhook ──────────────────────────────────────────────────────
   if (req.method === 'POST' && path === config.webhookPath) {
     const body = await readBody(req, 2 * 1024 * 1024)
