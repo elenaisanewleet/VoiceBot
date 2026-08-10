@@ -63,10 +63,3 @@ export const sendMessage = (chatId, text, extra = {}) =>
 export const answerInlineQuery = (inlineQueryId, results, extra = {}) =>
   call('answerInlineQuery', { inline_query_id: inlineQueryId, results, ...extra })
 
-/**
- * Отправляет сообщение в тот чат, откуда пользователь открыл Mini App.
- * Работает только если Mini App был открыт кнопкой из inline-режима —
- * именно в этом случае Telegram кладёт query_id в initData.
- */
-export const answerWebAppQuery = (webAppQueryId, result) =>
-  call('answerWebAppQuery', { web_app_query_id: webAppQueryId, result })

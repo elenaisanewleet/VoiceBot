@@ -7,7 +7,6 @@ import { config } from './config.js'
 import { verifyInitData } from './initData.js'
 import { verifyToken } from './token.js'
 import { speechToText, polish, STYLES } from './stt.js'
-import * as store from './store.js'
 import * as tg from './telegram.js'
 import { handleUpdate, bootstrap } from './bot.js'
 
@@ -240,62 +239,15 @@ export async function handleRequest(req, res) {
     }
   }
 
-  // ── отправить текст в тот чат, откуда открыли Mini App ────────────────────
-  if (req.method === 'POST' && path === '/api/send') {
-    const body = await readBody(req, 256 * 1024).then((b) => safeJson(b))
-    if (!body) return json(res, 400, { error: 'bad json' })
-    const session = auth(req, res, body)
-    if (!session) return
-
-    const text = String(body.text || '').trim().slice(0, 4096)
-    if (!text) return json(res, 400, { error: 'пустой текст' })
-
-    const entry = store.remember(session.userId, text)
-
-    if (!session.queryId) {
-      // Mini App открыли не из inline-режима (например, из меню в личке) —
-      // отправить напрямую нельзя, отдаём клиенту ключ для выбора чата.
-      return json(res, 200, { sent: false, needsChatPick: true, query: inlineQueryFor(entry) })
-    }
-
-    try {
-      await tg.answerWebAppQuery(session.queryId, {
-        type: 'article',
-        id: entry?.id || 'send',
-        title: 'Сообщение',
-        description: text.slice(0, 100),
-        input_message_content: { message_text: text },
-      })
-      return json(res, 200, { sent: true })
-    } catch (err) {
-      console.error('[send]', err)
-      // query_id живёт недолго и одноразов — предлагаем запасной путь.
-      return json(res, 200, {
-        sent: false,
-        needsChatPick: true,
-        query: inlineQueryFor(entry),
-        error: err.message,
-      })
-    }
-  }
-
-  // ── сохранить черновик и получить ключ для switchInlineQuery ──────────────
-  if (req.method === 'POST' && path === '/api/draft') {
-    const body = await readBody(req, 256 * 1024).then((b) => safeJson(b))
-    if (!body) return json(res, 400, { error: 'bad json' })
-    const session = auth(req, res, body)
-    if (!session) return
-    const text = String(body.text || '').trim().slice(0, 4096)
-    if (!text) return json(res, 400, { error: 'пустой текст' })
-    const entry = store.remember(session.userId, text)
-    return json(res, 200, { id: entry.id, query: inlineQueryFor(entry) })
-  }
+  // Отправки на сервере нет намеренно. Единственный способ отдать текст в чат
+  // от имени человека — answerWebAppQuery, а он кладёт сообщение «в тот чат,
+  // откуда открыли окно»: из чата с ботом это сам бот, а из inline-режима
+  // Telegram не выдаёт query_id вовсе. Текст возвращает клиент через строку
+  // ввода (switchInlineQuery) или через буфер обмена.
 
   if (req.method === 'GET') return serveStatic(res, path)
   return send(res, 405, 'method not allowed')
 }
-
-const inlineQueryFor = (entry) => (entry.text.length <= 200 ? entry.text : `#${entry.id}`)
 
 function safeJson(buf) {
   try {

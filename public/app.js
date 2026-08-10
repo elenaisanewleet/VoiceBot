@@ -32,7 +32,6 @@ const el = {
   browser: document.getElementById('browser'),
   styles: document.getElementById('styles'),
   lang: document.getElementById('lang'),
-  autosend: document.getElementById('autosend'),
   error: document.getElementById('error'),
 }
 
@@ -47,7 +46,7 @@ const MOBILE = PLATFORM === 'ios' || PLATFORM === 'android'
 
 // ── настройки ───────────────────────────────────────────────────────────────
 
-const DEFAULTS = { style: 'clean', lang: 'ru', autosend: false }
+const DEFAULTS = { style: 'clean', lang: 'ru' }
 const SETTINGS_KEY = '139bot.settings'
 
 const settings = (() => {
@@ -235,7 +234,6 @@ const SILENCE_MS = 700 // столько тишины считаем концо�
 const MIN_SPEECH_MS = 350 // короче — это кашель, а не фраза
 const MAX_SEGMENT_MS = 7000 // длинный монолог режем, чтобы текст шёл на глазах
 const IDLE_RESTART_MS = 10_000 // молчим — не копим пустой файл
-const AUTOSEND_AFTER_MS = 1400 // пауза, после которой авторежим отправляет
 
 const MIME_CANDIDATES = [
   'audio/webm;codecs=opus',
@@ -499,7 +497,6 @@ function tick() {
 
   if (enough && !speaking && sinceVoice >= SILENCE_MS) {
     cutSegment()
-    maybeAutosend()
     return
   }
   if (rec.speechMs >= MAX_SEGMENT_MS) {
@@ -511,24 +508,10 @@ function tick() {
   }
 }
 
-let autosendTimer = null
-
-function maybeAutosend() {
-  if (!settings.autosend) return
-  clearTimeout(autosendTimer)
-  autosendTimer = setTimeout(async () => {
-    if (!settings.autosend || !state.recording) return
-    if (state.pending > 0 || !currentText()) return
-    await stopRecording()
-    await send()
-  }, AUTOSEND_AFTER_MS)
-}
-
 async function stopRecording() {
   if (!state.recording) return
   state.recording = false
   clearInterval(rec.timer)
-  clearTimeout(autosendTimer)
   await cutSegment({ restart: false })
 
   rec.stream?.getTracks().forEach((t) => t.stop())
@@ -613,7 +596,7 @@ async function copyText(text) {
 
 async function send() {
   const text = currentText().slice(0, MAX_LEN)
-  if (!text || state.sending) return
+  if (!text) return
 
   // Окно открыто в обычном браузере — мы сами себя туда отправили, когда клиент
   // не дал микрофон. Отправлять оттуда некуда, зато буфер обмена работает.
@@ -622,56 +605,27 @@ async function send() {
     return
   }
 
-  // Окно открыто из панели поверх чужого чата: возвращаемся ровно туда же с
-  // готовым текстом. Сервер тут не нужен — Telegram сам вернёт нас в тот чат,
-  // из которого мы пришли, и подставит текст в строку ввода.
-  if (!initData && appToken) {
-    if (text.length > INLINE_LIMIT) return showError(TOO_LONG_FOR_INLINE)
-    try {
-      haptic('impact', 'light')
-      tg.switchInlineQuery(text)
-    } catch (err) {
-      // Старый клиент или выключённый inline-режим — путь через буфер остаётся.
-      console.error('switchInlineQuery', err)
-      showError('Отсюда отправить не вышло. Нажмите «Копировать» и вставьте в поле ввода.')
-    }
-    return
-  }
+  if (text.length > INLINE_LIMIT) return showError(TOO_LONG_FOR_INLINE)
 
-  state.sending = true
-  syncMainButton()
-  tg?.MainButton?.showProgress?.(true)
-
+  // Текст всегда возвращаем через строку ввода — сервер тут не нужен.
+  //
+  // Раньше отсюда вызывался answerWebAppQuery, но он отправляет «в тот чат,
+  // откуда открыли окно». Из чата с ботом это и есть чат с ботом — сообщение
+  // уходило не человеку. Годится он только для запуска из inline-режима, а там
+  // Telegram как раз не выдаёт query_id. То есть не годится никогда.
   try {
-    const result = await api('/api/send', { body: { text } })
-    if (result.sent) {
-      haptic('notification', 'success')
-      tg?.close?.()
-      return
-    }
-    // Обычный путь: просим Telegram показать выбор чата с готовым текстом.
-    if (result.needsChatPick) {
-      // Текст едет в строке inline-запроса, а она короткая. Длинный сюда не
-      // влезет — тогда честно предлагаем скопировать.
-      if (String(result.query).startsWith('#')) {
-        showError(TOO_LONG_FOR_INLINE)
-      } else if (tg?.switchInlineQuery && tg.isVersionAtLeast?.('6.7')) {
-        tg.switchInlineQuery(result.query, ['users', 'groups', 'channels'])
-      } else {
-        showError(
-          'Ваш Telegram не умеет выбирать чат отсюда. Нажмите «Скопировать» ' +
-            'и вставьте текст в нужный чат.',
-        )
-      }
+    haptic('impact', 'light')
+    if (initData) {
+      // Открыто из чата с ботом — куда отправлять, знает только человек.
+      tg.switchInlineQuery(text, ['users', 'groups', 'channels'])
+    } else {
+      // Открыто из панели поверх чужого чата — возвращаемся ровно туда же.
+      tg.switchInlineQuery(text)
     }
   } catch (err) {
-    console.error('send', err)
-    haptic('notification', 'error')
-    showError('Не удалось отправить: ' + err.message)
-  } finally {
-    state.sending = false
-    tg?.MainButton?.hideProgress?.()
-    syncMainButton()
+    // Старый клиент или выключённый inline-режим — путь через буфер остаётся.
+    console.error('switchInlineQuery', err)
+    showError('Отсюда отправить не вышло. Нажмите «Копировать» и вставьте в поле ввода.')
   }
 }
 
@@ -740,19 +694,6 @@ el.lang.addEventListener('change', () => {
   saveSettings()
 })
 
-el.autosend.addEventListener('change', () => {
-  settings.autosend = el.autosend.checked
-  saveSettings()
-  setStatus(
-    settings.autosend
-      ? 'Авторежим: договорили — сообщение ушло'
-      : state.recording
-        ? 'Слушаю — говорите'
-        : 'Нажмите и говорите',
-    state.recording,
-  )
-})
-
 function renderSettings() {
   for (const pill of el.styles.querySelectorAll('[data-style]')) {
     const active = pill.dataset.style === settings.style
@@ -760,7 +701,6 @@ function renderSettings() {
     pill.setAttribute('aria-checked', String(active))
   }
   el.lang.value = settings.lang
-  el.autosend.checked = settings.autosend
 }
 
 // ── старт ───────────────────────────────────────────────────────────────────

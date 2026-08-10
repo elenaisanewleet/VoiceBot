@@ -10,7 +10,6 @@ process.env.STT_API_KEY = 'test-key'
 process.env.PORT = '0'
 
 const { startServer } = await import('../src/server.js')
-const { _reset } = await import('../src/store.js')
 const { config } = await import('../src/config.js')
 const { mintToken } = await import('../src/token.js')
 
@@ -68,50 +67,24 @@ test('не выпускает за пределы public/', async () => {
 })
 
 test('без подписи в api не пускает', async () => {
-  for (const path of ['/api/send', '/api/draft', '/api/polish']) {
-    const res = await post(path, { text: 'привет' })
-    assert.equal(res.status, 401, path)
-  }
+  const res = await post('/api/polish', { text: 'привет' })
+  assert.equal(res.status, 401)
   const stt = await fetch(base + '/api/stt', { method: 'POST', body: 'x' })
   assert.equal(stt.status, 401)
 })
 
 test('с чужой подписью не пускает', async () => {
   const forged = initDataFor({}).replace(/hash=.*/, 'hash=' + 'a'.repeat(64))
-  const res = await post('/api/send', { initData: forged, text: 'привет' })
+  const res = await post('/api/polish', { initData: forged, text: 'привет' })
   assert.equal(res.status, 401)
 })
 
-test('без query_id предлагает выбрать чат и отдаёт текст запроса', async () => {
-  _reset()
-  const res = await post('/api/send', { initData: initDataFor({}), text: 'Привет, как дела?' })
-  assert.equal(res.status, 200)
-  const data = await res.json()
-  assert.equal(data.sent, false)
-  assert.equal(data.needsChatPick, true)
-  assert.equal(data.query, 'Привет, как дела?')
-})
-
-test('длинный текст уезжает в inline-запрос ключом, а не целиком', async () => {
-  _reset()
-  const long = 'а'.repeat(500)
-  const res = await post('/api/send', { initData: initDataFor({}), text: long })
-  const data = await res.json()
-  assert.match(data.query, /^#t/)
-  assert.ok(data.query.length < 40)
-})
-
-test('пустой текст отклоняется', async () => {
-  const res = await post('/api/send', { initData: initDataFor({}), text: '   ' })
-  assert.equal(res.status, 400)
-})
-
 test('пропуск из адреса кнопки пускает вместо данных запуска', async () => {
-  _reset()
   const token = mintToken(777, config.appSecret)
-  const res = await post('/api/draft', { token, text: 'из чужого чата' })
+  // Пустой текст причёсывать нечего — ответ приходит до похода к модели,
+  // поэтому проверка касается ровно того, ради чего написана: кого пустили.
+  const res = await post('/api/polish', { token, text: '' })
   assert.equal(res.status, 200)
-  assert.equal((await res.json()).query, 'из чужого чата')
 
   // Тот же пропуск заголовком — так его шлёт запись голоса, у которой тело
   // занято звуком.
@@ -123,30 +96,20 @@ test('пропуск из адреса кнопки пускает вместо 
   assert.notEqual(stt.status, 401) // пустое аудио — уже другая история
 })
 
-test('данные запуска важнее пропуска — с ними приходит адрес чата', async () => {
-  _reset()
-  // Окно из чата с ботом получает и то и другое. Выбрать нужно данные запуска:
-  // только в них есть query_id, которым сообщение уходит прямо в чат.
-  const res = await post('/api/draft', {
+test('данные запуска не отменяются мусорным пропуском', async () => {
+  // Из чата с ботом окно получает и то и другое: проверять надо оба, пока
+  // хоть одно не подойдёт.
+  const res = await post('/api/polish', {
     initData: initDataFor({}),
     token: 'мусор.мусор',
-    text: 'оба сразу',
+    text: '',
   })
   assert.equal(res.status, 200)
 })
 
 test('поддельный пропуск не пускает', async () => {
   const [payload] = mintToken(777, config.appSecret).split('.')
-  const res = await post('/api/draft', { token: `${payload}.${'x'.repeat(32)}`, text: 'нет' })
+  const res = await post('/api/polish', { token: `${payload}.${'x'.repeat(32)}`, text: '' })
   assert.equal(res.status, 401)
   assert.match((await res.json()).reason, /подделан/)
-})
-
-test('draft сохраняет фразу и возвращает ключ', async () => {
-  _reset()
-  const res = await post('/api/draft', { initData: initDataFor({}), text: 'черновик' })
-  assert.equal(res.status, 200)
-  const data = await res.json()
-  assert.match(data.id, /^t/)
-  assert.equal(data.query, 'черновик')
 })
