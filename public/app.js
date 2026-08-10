@@ -55,6 +55,18 @@ const OUTSIDE_TELEGRAM =
   'Эта страница работает только внутри Telegram. Наберите имя бота в любом ' +
   'чате и нажмите кнопку «🎙 Говорить» — окно откроется само.'
 
+/**
+ * Признаки того, как открыли страницу. Снаружи Telegram библиотека всё равно
+ * загружается и подставляет площадку «unknown» — по ней и видно разницу между
+ * «открыли в браузере» и «что-то сломалось внутри Telegram».
+ */
+function describeLaunch() {
+  const platform = window.Telegram?.WebApp?.platform || 'нет'
+  const version = window.Telegram?.WebApp?.version || '—'
+  const chat = new URLSearchParams(window.Telegram?.WebApp?.initData || '').get('query_id')
+  return `площадка: ${platform}, версия: ${version}, чат назначения: ${chat ? 'есть' : 'нет'}`
+}
+
 const state = {
   recording: false,
   starting: false,
@@ -204,7 +216,7 @@ async function startRecording() {
   if (state.recording || state.starting) return
   // Без данных запуска отправлять всё равно некуда, а записанное пропадёт зря.
   // Проверяем до очистки ошибки, иначе объяснение исчезнет с экрана.
-  if (!initData) return showError(OUTSIDE_TELEGRAM)
+  if (!initData) return showError(`${OUTSIDE_TELEGRAM}\n(${describeLaunch()})`)
   showError('')
   const mime = pickMime()
   if (!navigator.mediaDevices?.getUserMedia || mime === null) {
@@ -550,11 +562,18 @@ function renderSettings() {
 
 // ── старт ───────────────────────────────────────────────────────────────────
 
+/** Записывать без данных запуска нечего — гасим микрофон, чтобы это было видно. */
+function blockRecording() {
+  showError(`${OUTSIDE_TELEGRAM}\n(${describeLaunch()})`)
+  el.mic.classList.add('is-busy')
+  el.mic.setAttribute('aria-disabled', 'true')
+}
+
 function init() {
   renderSettings()
 
   if (!tg) {
-    showError(OUTSIDE_TELEGRAM)
+    blockRecording()
     return
   }
 
@@ -566,7 +585,7 @@ function init() {
 
   // Библиотека Telegram грузится на любой странице, поэтому сам по себе объект
   // ничего не доказывает — судим по данным запуска.
-  if (!initData) showError(OUTSIDE_TELEGRAM)
+  if (!initData) blockRecording()
 
   syncMainButton()
 }
