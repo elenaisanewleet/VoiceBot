@@ -29,6 +29,10 @@ body {
 
 .app {
   min-height: 100%;
+  /* На телефоне окно узкое само по себе, а в настольном клиенте и в браузере
+     страница растянулась бы на всю ширину — держим ту же колонку. */
+  max-width: 460px;
+  margin: 0 auto;
   padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
@@ -87,6 +91,30 @@ body {
   height: 46px;
   position: relative;
   z-index: 1;
+  grid-area: 1 / 1; /* обе иконки в одной клетке — меняем видимую */
+}
+
+.mic__icon--stop,
+.mic.is-recording .mic__icon--talk {
+  display: none;
+}
+
+.mic.is-recording .mic__icon--stop {
+  display: block;
+}
+
+/* Подпись прямо под кнопкой: что именно случится от нажатия сейчас. */
+.miclabel {
+  margin: -6px 0 0;
+  min-height: 18px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.miclabel.is-live {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* Кольцо дышит в такт громкости — видно, что микрофон реально слышит. */
@@ -177,6 +205,22 @@ body {
   font-size: 14px;
   padding: 4px;
   cursor: pointer;
+}
+
+/* «Копировать» — не второстепенная мелочь, а равноправный способ отправки:
+   единственный, при котором нет пометки «с помощью бота». */
+.linkbtn--strong {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  font-weight: 600;
+}
+
+.note {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 /* ── настройки ────────────────────────────────────────────────────────────── */
@@ -282,6 +326,19 @@ body {
   color: var(--danger);
   font-size: 14px;
   white-space: pre-line; /* пояснение под сообщением идёт со своей строки */
+}
+
+.fallback {
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 12px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
 }
 
 @media (prefers-reduced-motion: reduce) {

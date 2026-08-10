@@ -123,6 +123,18 @@ test('пропуск из адреса кнопки пускает вместо 
   assert.notEqual(stt.status, 401) // пустое аудио — уже другая история
 })
 
+test('данные запуска важнее пропуска — с ними приходит адрес чата', async () => {
+  _reset()
+  // Окно из чата с ботом получает и то и другое. Выбрать нужно данные запуска:
+  // только в них есть query_id, которым сообщение уходит прямо в чат.
+  const res = await post('/api/draft', {
+    initData: initDataFor({}),
+    token: 'мусор.мусор',
+    text: 'оба сразу',
+  })
+  assert.equal(res.status, 200)
+})
+
 test('поддельный пропуск не пускает', async () => {
   const [payload] = mintToken(777, config.appSecret).split('.')
   const res = await post('/api/draft', { token: `${payload}.${'x'.repeat(32)}`, text: 'нет' })

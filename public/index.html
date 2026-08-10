@@ -13,7 +13,7 @@
 
       <button class="mic" id="mic" aria-label="Начать запись">
         <span class="mic__ring" id="ring"></span>
-        <svg class="mic__icon" viewBox="0 0 24 24" aria-hidden="true">
+        <svg class="mic__icon mic__icon--talk" viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"
             fill="currentColor"
@@ -23,7 +23,13 @@
             fill="currentColor"
           />
         </svg>
+        <!-- Во время записи та же кнопка становится «стоп» — иначе непонятно,
+             чем закончить, и её жмут повторно наугад. -->
+        <svg class="mic__icon mic__icon--stop" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="7" y="7" width="10" height="10" rx="2.5" fill="currentColor" />
+        </svg>
       </button>
+      <p class="miclabel" id="miclabel">Нажмите, чтобы говорить</p>
 
       <section class="sheet">
         <textarea
@@ -35,10 +41,16 @@
         <div class="text__foot">
           <span id="hint" class="hint"></span>
           <span class="text__actions">
-            <button id="copy" class="linkbtn" type="button">Скопировать</button>
+            <button id="copy" class="linkbtn linkbtn--strong" type="button">Копировать</button>
             <button id="clear" class="linkbtn" type="button">Очистить</button>
           </span>
         </div>
+        <p class="note">
+          «Отправить» — уйдёт в чат, но с пометкой «с помощью бота»: её ставит
+          сам Telegram на всё, что отправлено через строку с именем бота.
+          «Копировать» — текст ляжет в буфер, вставите в поле ввода сами, и
+          пометки не будет.
+        </p>
       </section>
 
       <section class="settings" id="settings">
@@ -73,6 +85,12 @@
       </section>
 
       <p class="error" id="error" hidden></p>
+      <!-- Запасной выход для настольных клиентов: там микрофон странице даёт
+           не Telegram, а система, и иногда не даёт вовсе. Пропуск вшит в адрес,
+           поэтому та же страница работает и в обычном браузере. -->
+      <button class="fallback" id="browser" type="button" hidden>
+        Открыть в браузере — там микрофон точно доступен
+      </button>
     </main>
 
     <script src="/app.js" type="module"></script>

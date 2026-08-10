@@ -73,21 +73,26 @@ async function readBody(req, limit) {
  * При провале сразу отвечаем 401.
  */
 function auth(req, res, body = {}) {
+  // Сначала данные запуска: они богаче — вместе с ними приходит query_id, а с
+  // ним можно отправить сообщение прямо в исходный чат. Пропуск такого не даёт,
+  // поэтому он именно запасной, даже когда пришли оба.
+  const initData = body.initData ?? req.headers['x-init-data']
+  let reason = 'ни данных запуска, ни пропуска'
+  if (initData) {
+    const result = verifyInitData(String(initData), config.botToken)
+    if (result.ok) return result
+    reason = result.reason
+  }
+
   const token = body.token ?? req.headers['x-app-token']
   if (token) {
     const pass = verifyToken(String(token), config.appSecret)
     if (pass.ok) return { ok: true, userId: pass.userId, queryId: null }
-    json(res, 401, { error: 'unauthorized', reason: pass.reason })
-    return null
+    reason = pass.reason
   }
 
-  const initData = body.initData ?? req.headers['x-init-data']
-  const result = verifyInitData(String(initData || ''), config.botToken)
-  if (!result.ok) {
-    json(res, 401, { error: 'unauthorized', reason: result.reason })
-    return null
-  }
-  return result
+  json(res, 401, { error: 'unauthorized', reason })
+  return null
 }
 
 const pickStyle = (v) => (STYLES.includes(v) ? v : config.defaultStyle)

@@ -10,6 +10,12 @@
  *  • Готовый текст возвращается в тот же чат через switchInlineQuery — это
  *    штатный способ вернуться из окна обратно в переписку. Уходит обычным
  *    текстовым сообщением от имени пользователя, без голосовых.
+ *  • Второй способ отправки — буфер обмена. Он единственный без пометки
+ *    «с помощью бота»: её Telegram ставит на всё, что ушло через строку с
+ *    именем бота, и отключить её нельзя.
+ *  • Настольные клиенты дают микрофон не всегда: там страница живёт в системном
+ *    движке или во фрейме веб-версии. Если не дали — предлагаем открыть эту же
+ *    страницу в браузере: пропуск вшит в адрес, значит она там полноценна.
  */
 
 const tg = window.Telegram?.WebApp
@@ -17,16 +23,27 @@ const tg = window.Telegram?.WebApp
 const el = {
   status: document.getElementById('status'),
   mic: document.getElementById('mic'),
+  miclabel: document.getElementById('miclabel'),
   ring: document.getElementById('ring'),
   text: document.getElementById('text'),
   hint: document.getElementById('hint'),
   clear: document.getElementById('clear'),
   copy: document.getElementById('copy'),
+  browser: document.getElementById('browser'),
   styles: document.getElementById('styles'),
   lang: document.getElementById('lang'),
   autosend: document.getElementById('autosend'),
   error: document.getElementById('error'),
 }
+
+// ── где мы открыты ──────────────────────────────────────────────────────────
+// Библиотека Telegram грузится на любой странице и вне Telegram подставляет
+// площадку «unknown» — по ней и отличаем окно внутри мессенджера от вкладки
+// обычного браузера, куда мы сами же можем себя отправить (см. openInBrowser).
+
+const PLATFORM = tg?.platform || 'unknown'
+const INSIDE_TELEGRAM = PLATFORM !== 'unknown'
+const MOBILE = PLATFORM === 'ios' || PLATFORM === 'android'
 
 // ── настройки ───────────────────────────────────────────────────────────────
 
@@ -102,6 +119,34 @@ function setStatus(text, live = false) {
 function setHint(text, working = false) {
   el.hint.textContent = text
   el.hint.classList.toggle('is-working', working)
+}
+
+/** Подпись под кнопкой: что произойдёт от нажатия прямо сейчас. */
+function setMicLabel(text, live = false) {
+  el.miclabel.textContent = text
+  el.miclabel.classList.toggle('is-live', live)
+}
+
+const IDLE_LABEL = 'Нажмите, чтобы говорить'
+
+// Таймер под кнопкой — самое наглядное доказательство, что запись идёт и что
+// закончить её нужно этой же кнопкой.
+let clockTimer = null
+
+function startClock() {
+  const started = Date.now()
+  const paint = () => {
+    const s = Math.round((Date.now() - started) / 1000)
+    const mmss = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+    setMicLabel(`Идёт запись · ${mmss} — нажмите, чтобы закончить`, true)
+  }
+  paint()
+  clockTimer = setInterval(paint, 1000)
+}
+
+function stopClock() {
+  clearInterval(clockTimer)
+  clockTimer = null
 }
 
 const MAX_LEN = 4096
@@ -225,15 +270,63 @@ const rec = {
   calibrateUntil: 0,
 }
 
+// ── микрофон: почему клиент может его не дать ───────────────────────────────
+// На телефоне окно записи — это webview внутри Telegram, и разрешение спрашивает
+// сам Telegram. В настольных клиентах страница живёт в системном движке
+// (WKWebView на macOS, WebView2 на Windows) или во фрейме веб-версии — там доступ
+// решают система и политика фрейма, и отказ приходит таким же глухим
+// NotAllowedError. Поэтому проверяем заранее, объясняем по-разному и всегда
+// оставляем запасной выход: та же страница с тем же пропуском открывается в
+// обычном браузере, где микрофон точно есть.
+
+function micUnavailableReason() {
+  if (!window.isSecureContext) return 'Страница открыта не по https — микрофон браузер не даст.'
+  if (!navigator.mediaDevices?.getUserMedia) return 'Этот клиент не пускает страницу к микрофону.'
+  if (document.featurePolicy?.allowsFeature?.('microphone') === false) {
+    return 'Клиент открыл окно без разрешения на микрофон.'
+  }
+  if (pickMime() === null) return 'Этот клиент не умеет записывать звук со страницы.'
+  return null
+}
+
+function micPermissionHelp() {
+  if (MOBILE) {
+    return 'Разрешите Telegram доступ к микрофону в настройках телефона и откройте окно заново.'
+  }
+  if (PLATFORM === 'macos' || PLATFORM === 'tdesktop') {
+    return (
+      'Разрешите микрофон самому приложению Telegram: macOS — Системные настройки → ' +
+      'Конфиденциальность и безопасность → Микрофон; Windows — Параметры → ' +
+      'Конфиденциальность → Микрофон. Затем откройте окно заново.'
+    )
+  }
+  return 'Разрешите доступ к микрофону для этой страницы в настройках браузера.'
+}
+
+/** Адрес этой же страницы для внешнего браузера — с пропуском, но без хвоста Telegram. */
+const browserUrl = () =>
+  location.origin + location.pathname + (appToken ? `?t=${encodeURIComponent(appToken)}` : '')
+
+/** Пропуск живёт час и вшит в адрес, так что в браузере страница полноценна. */
+function offerBrowser(show) {
+  el.browser.hidden = !(show && INSIDE_TELEGRAM && Boolean(appToken))
+}
+
 async function startRecording() {
   if (state.recording || state.starting) return
   // Без данных запуска отправлять всё равно некуда, а записанное пропадёт зря.
   // Проверяем до очистки ошибки, иначе объяснение исчезнет с экрана.
   if (!authorized()) return showError(`${OUTSIDE_TELEGRAM}\n(${describeLaunch()})`)
   showError('')
-  const mime = pickMime()
-  if (!navigator.mediaDevices?.getUserMedia || mime === null) {
-    showError('Этот клиент не даёт доступ к микрофону. Пришлите голосовое в чат с ботом — я расшифрую.')
+  offerBrowser(false)
+
+  const blocked = micUnavailableReason()
+  if (blocked) {
+    showError(
+      `${blocked}\n${micPermissionHelp()}\n` +
+        'Либо пришлите голосовое в чат с ботом — расшифрую и верну текстом.',
+    )
+    offerBrowser(true)
     return
   }
 
@@ -245,16 +338,22 @@ async function startRecording() {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     })
   } catch (err) {
+    const denied = err.name === 'NotAllowedError' || err.name === 'SecurityError'
     showError(
-      err.name === 'NotAllowedError'
-        ? 'Микрофон запрещён. Разрешите Telegram доступ к микрофону в настройках телефона и откройте заново.'
-        : 'Микрофон недоступен: ' + err.message,
+      denied
+        ? `Микрофон запрещён. ${micPermissionHelp()}`
+        : err.name === 'NotFoundError'
+          ? 'Микрофон не найден — проверьте, что он подключён и выбран в системе.'
+          : 'Микрофон недоступен: ' + err.message,
     )
+    offerBrowser(true)
     return
   } finally {
     state.starting = false
     el.mic.classList.remove('is-busy')
   }
+
+  const mime = pickMime()
 
   rec.mime = mime
   const Ctx = window.AudioContext || window.webkitAudioContext
@@ -270,8 +369,9 @@ async function startRecording() {
   state.recording = true
 
   el.mic.classList.add('is-recording')
-  el.mic.setAttribute('aria-label', 'Остановить запись')
+  el.mic.setAttribute('aria-label', 'Закончить запись')
   setStatus('Слушаю — говорите', true)
+  startClock()
   setHint('')
   haptic('impact', 'medium')
   tg?.enableClosingConfirmation?.()
@@ -440,10 +540,13 @@ async function stopRecording() {
   rec.stream = null
   rec.ctx = null
 
+  stopClock()
   el.mic.classList.remove('is-recording')
   el.mic.setAttribute('aria-label', 'Начать запись')
   el.ring.style.transform = 'scale(1)'
-  setStatus(currentText() || state.pending ? 'Готово — проверьте и отправьте' : 'Нажмите и говорите')
+  const said = Boolean(currentText() || state.pending)
+  setStatus(said ? 'Готово — проверьте и отправьте' : 'Нажмите и говорите')
+  setMicLabel(said ? 'Можно продолжить — нажмите ещё раз' : IDLE_LABEL)
   haptic('impact', 'light')
   tg?.disableClosingConfirmation?.()
   syncMainButton()
@@ -483,20 +586,55 @@ const INLINE_LIMIT = 240
 
 const TOO_LONG_FOR_INLINE =
   'Текст длинный — Telegram не пропустит его через строку запроса. ' +
-  'Нажмите «Скопировать» и вставьте в чат вручную.'
+  'Нажмите «Копировать» и вставьте в чат вручную.'
+
+const PASTE_IT = 'Скопировано — вставьте в поле ввода чата (долгое нажатие → Вставить).'
+
+/**
+ * Кладём текст в буфер. Это единственная отправка без пометки «с помощью бота»:
+ * всё, что уходит через строку с именем бота, Telegram помечает сам.
+ */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    /* в части webview буфер закрыт для скрипта — пробуем по-старому */
+  }
+  try {
+    el.text.focus()
+    el.text.setSelectionRange(0, el.text.value.length)
+    if (document.execCommand?.('copy')) return true
+  } catch {
+    /* и этого может не быть */
+  }
+  return false
+}
 
 async function send() {
   const text = currentText().slice(0, MAX_LEN)
   if (!text || state.sending) return
+
+  // Окно открыто в обычном браузере — мы сами себя туда отправили, когда клиент
+  // не дал микрофон. Отправлять оттуда некуда, зато буфер обмена работает.
+  if (!INSIDE_TELEGRAM) {
+    setStatus((await copyText(text)) ? PASTE_IT : 'Скопируйте текст и вставьте в чат.')
+    return
+  }
 
   // Окно открыто из панели поверх чужого чата: возвращаемся ровно туда же с
   // готовым текстом. Сервер тут не нужен — Telegram сам вернёт нас в тот чат,
   // из которого мы пришли, и подставит текст в строку ввода.
   if (!initData && appToken) {
     if (text.length > INLINE_LIMIT) return showError(TOO_LONG_FOR_INLINE)
-    if (!tg?.switchInlineQuery) return showError(TOO_LONG_FOR_INLINE)
-    haptic('impact', 'light')
-    tg.switchInlineQuery(text)
+    try {
+      haptic('impact', 'light')
+      tg.switchInlineQuery(text)
+    } catch (err) {
+      // Старый клиент или выключённый inline-режим — путь через буфер остаётся.
+      console.error('switchInlineQuery', err)
+      showError('Отсюда отправить не вышло. Нажмите «Копировать» и вставьте в поле ввода.')
+    }
     return
   }
 
@@ -549,19 +687,31 @@ el.text.addEventListener('input', syncMainButton)
 el.copy.addEventListener('click', async () => {
   const text = currentText()
   if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-  } catch {
-    // В некоторых webview доступа к буферу нет — выделяем текст, чтобы
-    // сработало «Копировать» из системного меню.
+  if (!(await copyText(text))) {
     el.text.focus()
     el.text.select()
-    showError('Скопируйте выделенное вручную — здесь буфер обмена закрыт.')
+    showError('Скопируйте выделенное вручную — здесь буфер обмена закрыт для страницы.')
     return
   }
   haptic('notification', 'success')
+  showError('')
   setHint('скопировано')
-  setTimeout(() => setHint(''), 2000)
+  // Окно закрываем не сами: человек мог копировать про запас, а несохранённый
+  // текст здесь нигде не лежит. Просто говорим, что делать дальше.
+  setStatus(PASTE_IT)
+})
+
+el.browser.addEventListener('click', () => {
+  tg?.openLink?.(browserUrl(), { try_instant_view: false })
+})
+
+// На настольном клиенте руки на клавиатуре — привычное сочетание уместнее,
+// чем тянуться мышью к кнопке внизу окна.
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault()
+    send()
+  }
 })
 
 el.clear.addEventListener('click', () => {
@@ -620,13 +770,24 @@ function blockRecording() {
   showError(`${OUTSIDE_TELEGRAM}\n(${describeLaunch()})`)
   el.mic.classList.add('is-busy')
   el.mic.setAttribute('aria-disabled', 'true')
+  setMicLabel('')
 }
 
 function init() {
   renderSettings()
+  setMicLabel(IDLE_LABEL)
 
-  if (!tg) {
+  // Библиотека Telegram грузится на любой странице, поэтому сам по себе объект
+  // ничего не доказывает — судим по данным запуска и по площадке.
+  if (!authorized()) {
     blockRecording()
+    return
+  }
+
+  if (!INSIDE_TELEGRAM) {
+    // Вкладка браузера: сюда попадают по кнопке «Открыть в браузере». Кнопки
+    // Telegram внизу окна тут нет, поэтому сразу говорим, чем заканчивать.
+    setStatus('Наговорите текст и нажмите «Копировать» — вставите в чат сами')
     return
   }
 
@@ -635,10 +796,6 @@ function init() {
   tg.setHeaderColor?.('secondary_bg_color')
   tg.MainButton.onClick(send)
   tg.onEvent?.('themeChanged', () => {})
-
-  // Библиотека Telegram грузится на любой странице, поэтому сам по себе объект
-  // ничего не доказывает — судим по данным запуска.
-  if (!authorized()) blockRecording()
 
   syncMainButton()
 }
