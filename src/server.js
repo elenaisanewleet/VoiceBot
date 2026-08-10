@@ -8,7 +8,7 @@ import { verifyInitData } from './initData.js'
 import { speechToText, polish, STYLES } from './stt.js'
 import * as store from './store.js'
 import * as tg from './telegram.js'
-import { handleUpdate } from './bot.js'
+import { handleUpdate, bootstrap } from './bot.js'
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
 
@@ -78,12 +78,41 @@ async function serveStatic(res, urlPath) {
   }
 }
 
-async function handleRequest(req, res) {
+export async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
   const path = url.pathname
 
-  if (req.method === 'GET' && path === '/health') {
+  // /api/health — тот же ответ: на бессерверных площадках всё живёт под /api.
+  if (req.method === 'GET' && (path === '/health' || path === '/api/health')) {
     return json(res, 200, { ok: true, uptime: Math.round(process.uptime()) })
+  }
+
+  // ── разовая привязка бота к этому адресу ──────────────────────────────────
+  // На бессерверной площадке нет процесса, который сделал бы это при старте,
+  // поэтому есть ручка: открыть один раз в браузере после развёртывания.
+  // Повторные вызовы безвредны — вебхук каждый раз ставится на тот же адрес.
+  if (path === '/api/setup') {
+    try {
+      const info = await bootstrap()
+      await tg.call('setWebhook', {
+        url: config.publicUrl + config.webhookPath,
+        allowed_updates: ['message', 'inline_query'],
+      })
+      return send(
+        res,
+        200,
+        `Готово. Бот @${info.username} привязан к ${config.publicUrl}\n\n` +
+          'Теперь наберите @' +
+          info.username +
+          ' в любом чате Telegram.\n' +
+          'Если кнопки «Говорить» нет — в @BotFather не выполнен /setinline.',
+        { 'content-type': 'text/plain; charset=utf-8' },
+      )
+    } catch (err) {
+      return send(res, 500, 'Не получилось: ' + err.message, {
+        'content-type': 'text/plain; charset=utf-8',
+      })
+    }
   }
 
   // ── Telegram webhook ──────────────────────────────────────────────────────

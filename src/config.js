@@ -32,11 +32,16 @@ const bool = (v, fallback = false) =>
   v === undefined ? fallback : ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase())
 
 // На хостингах публичный адрес известен самой платформе — не заставляем
-// вписывать его руками. RENDER_EXTERNAL_URL подставляет Render.
-const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(
-  /\/+$/,
-  '',
-)
+// вписывать его руками. Render отдаёт готовый адрес, Vercel — только домен.
+function detectPublicUrl() {
+  const explicit = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL
+  if (explicit) return explicit
+  // У Vercel VERCEL_URL уникален для каждой сборки, а нужен постоянный адрес.
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL
+  return host ? `https://${host}` : ''
+}
+
+const publicUrl = detectPublicUrl().replace(/\/+$/, '')
 
 export const config = {
   botToken: process.env.BOT_TOKEN || '',
@@ -77,7 +82,9 @@ config.webhookSecret =
   process.env.WEBHOOK_SECRET ||
   createHash('sha256').update(`webhook:${config.botToken}`).digest('hex').slice(0, 32)
 
-config.webhookPath = `/webhook/${config.webhookSecret}`
+// Путь лежит под /api, чтобы бессерверные площадки отдавали его в ту же функцию,
+// что и остальные ручки.
+config.webhookPath = `/api/webhook/${config.webhookSecret}`
 
 export function assertConfig() {
   const problems = []

@@ -20,6 +20,6 @@ test('такой конфигурации хватает для запуска',
 })
 
 test('путь вебхука не угадывается и выведен из токена', () => {
-  assert.match(config.webhookPath, /^\/webhook\/[0-9a-f]{32}$/)
+  assert.match(config.webhookPath, /^\/api\/webhook\/[0-9a-f]{32}$/)
   assert.ok(!config.webhookPath.includes(config.botToken))
 })
