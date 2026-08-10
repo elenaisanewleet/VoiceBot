@@ -19,6 +19,7 @@ const el = {
   text: document.getElementById('text'),
   hint: document.getElementById('hint'),
   clear: document.getElementById('clear'),
+  copy: document.getElementById('copy'),
   styles: document.getElementById('styles'),
   lang: document.getElementById('lang'),
   autosend: document.getElementById('autosend'),
@@ -479,15 +480,18 @@ async function send() {
       tg?.close?.()
       return
     }
-    // Прямая отправка возможна только когда Mini App открыт из inline-режима.
-    // Иначе — просим Telegram показать выбор чата с уже готовым текстом.
+    // Обычный путь: просим Telegram показать выбор чата с готовым текстом.
     if (result.needsChatPick) {
-      if (tg?.switchInlineQuery && tg.isVersionAtLeast?.('6.7')) {
+      // Текст едет в строке inline-запроса, а она короткая. Длинный сюда не
+      // влезет — тогда честно предлагаем скопировать.
+      if (String(result.query).startsWith('#')) {
+        showError('Текст длинный — Telegram не пропустит его через выбор чата. Нажмите «Скопировать» и вставьте в нужный чат.')
+      } else if (tg?.switchInlineQuery && tg.isVersionAtLeast?.('6.7')) {
         tg.switchInlineQuery(result.query, ['users', 'groups', 'channels'])
       } else {
         showError(
-          'Отправить отсюда не получилось. Наберите @бота в нужном чате и нажмите «🎙 Говорить» — ' +
-            'тогда текст уйдёт прямо в этот чат.',
+          'Ваш Telegram не умеет выбирать чат отсюда. Нажмите «Скопировать» ' +
+            'и вставьте текст в нужный чат.',
         )
       }
     }
@@ -510,6 +514,24 @@ el.mic.addEventListener('click', () => {
 })
 
 el.text.addEventListener('input', syncMainButton)
+
+el.copy.addEventListener('click', async () => {
+  const text = currentText()
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // В некоторых webview доступа к буферу нет — выделяем текст, чтобы
+    // сработало «Копировать» из системного меню.
+    el.text.focus()
+    el.text.select()
+    showError('Скопируйте выделенное вручную — здесь буфер обмена закрыт.')
+    return
+  }
+  haptic('notification', 'success')
+  setHint('скопировано')
+  setTimeout(() => setHint(''), 2000)
+})
 
 el.clear.addEventListener('click', () => {
   el.text.value = ''

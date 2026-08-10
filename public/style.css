@@ -163,6 +163,12 @@ body {
   }
 }
 
+.text__actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
 .linkbtn {
   border: 0;
   background: none;
