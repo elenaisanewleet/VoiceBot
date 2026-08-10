@@ -37,16 +37,28 @@ function send(res, status, body, headers = {}) {
 const json = (res, status, obj) =>
   send(res, status, JSON.stringify(obj), { 'content-type': 'application/json; charset=utf-8' })
 
+function tooBig() {
+  const err = new Error('слишком большой запрос')
+  err.status = 413
+  return err
+}
+
 async function readBody(req, limit) {
+  // Бессерверные площадки часто читают тело за нас и кладут в req.body —
+  // поток к этому моменту уже пуст, и чтение вернуло бы ничего.
+  if (req.body !== undefined && req.body !== null) {
+    const pre = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body), 'utf8')
+    if (pre.length > limit) throw tooBig()
+    return pre
+  }
+
   const chunks = []
   let size = 0
   for await (const chunk of req) {
     size += chunk.length
-    if (size > limit) {
-      const err = new Error('слишком большой запрос')
-      err.status = 413
-      throw err
-    }
+    if (size > limit) throw tooBig()
     chunks.push(chunk)
   }
   return Buffer.concat(chunks)

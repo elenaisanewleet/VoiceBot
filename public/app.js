@@ -124,7 +124,8 @@ async function api(path, { body, headers = {}, raw = false } = {}) {
     body: raw ? body : JSON.stringify({ initData, ...body }),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.reason || `HTTP ${res.status}`)
+  // Причина всегда конкретнее общего кода ошибки — показываем её.
+  if (!res.ok) throw new Error(data.reason || data.error || `HTTP ${res.status}`)
   return data
 }
 

@@ -43,29 +43,41 @@ function detectPublicUrl() {
 
 const publicUrl = detectPublicUrl().replace(/\/+$/, '')
 
+/**
+ * При вставке значения в поле на сайте хостинга легко прихватить пробел или
+ * перенос строки. Токену это почти не мешает — разбор адреса выкидывает
+ * переносы, и запросы к Telegram проходят, — но подпись Mini App считается
+ * от самого токена и разъезжается. Ошибка при этом выглядит совершенно
+ * непонятно: бот работает, а окно с микрофоном отвечает «unauthorized».
+ * Поэтому обрезаем всё, что пришло из окружения.
+ */
+const env = (name, fallback = '') => (process.env[name] ?? fallback).trim()
+
 export const config = {
-  botToken: process.env.BOT_TOKEN || '',
+  botToken: env('BOT_TOKEN'),
   publicUrl,
   miniAppUrl: publicUrl ? `${publicUrl}/` : '',
-  port: Number(process.env.PORT || 8080),
+  port: Number(env('PORT', '8080')),
 
   stt: {
-    apiKey: process.env.STT_API_KEY || '',
-    baseUrl: (process.env.STT_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),
-    model: process.env.STT_MODEL || 'gpt-4o-mini-transcribe',
-    defaultLang: process.env.DEFAULT_LANG || '',
+    apiKey: env('STT_API_KEY'),
+    baseUrl: env('STT_BASE_URL', 'https://api.openai.com/v1').replace(/\/+$/, ''),
+    model: env('STT_MODEL', 'gpt-4o-mini-transcribe'),
+    defaultLang: env('DEFAULT_LANG'),
   },
 
   // Модель, которая превращает сырую расшифровку в грамотный текст.
   // По умолчанию ходит туда же, куда и распознавание.
   llm: {
-    apiKey: process.env.LLM_API_KEY || process.env.STT_API_KEY || '',
-    baseUrl: (process.env.LLM_BASE_URL || process.env.STT_BASE_URL || 'https://api.openai.com/v1')
-      .replace(/\/+$/, ''),
-    model: process.env.LLM_MODEL || 'gpt-4o-mini',
+    apiKey: env('LLM_API_KEY') || env('STT_API_KEY'),
+    baseUrl: (env('LLM_BASE_URL') || env('STT_BASE_URL', 'https://api.openai.com/v1')).replace(
+      /\/+$/,
+      '',
+    ),
+    model: env('LLM_MODEL', 'gpt-4o-mini'),
   },
 
-  defaultStyle: process.env.DEFAULT_STYLE || 'clean',
+  defaultStyle: env('DEFAULT_STYLE', 'clean'),
 
   useWebhook: bool(process.env.USE_WEBHOOK, false),
   maxAudioBytes: Number(process.env.MAX_AUDIO_BYTES || 20 * 1024 * 1024),

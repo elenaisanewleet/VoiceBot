@@ -30,7 +30,9 @@ export function verifyInitData(initData, botToken, { maxAgeSec = 24 * 60 * 60 } 
   const a = Buffer.from(expected, 'hex')
   const b = Buffer.from(hash, 'hex')
   if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    return { ok: false, reason: 'подпись не сходится' }
+    // Подпись считается от токена бота, так что расходится она почти всегда
+    // по одной причине — в BOT_TOKEN лежит не то, что выдал @BotFather.
+    return { ok: false, reason: 'подпись не сходится — проверьте BOT_TOKEN на хостинге' }
   }
 
   const authDate = Number(params.get('auth_date') || 0)
