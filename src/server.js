@@ -108,7 +108,9 @@ export async function handleRequest(req, res) {
       const info = await bootstrap()
       await tg.call('setWebhook', {
         url: config.publicUrl + config.webhookPath,
+        secret_token: config.webhookSecret,
         allowed_updates: ['message', 'inline_query'],
+        drop_pending_updates: false,
       })
       return send(
         res,
@@ -131,7 +133,6 @@ export async function handleRequest(req, res) {
   // Когда «ничего не работает», почти всегда виноват вебхук, и Telegram сам
   // хранит причину последней неудачи. Открывается в браузере.
   if (path === '/api/status') {
-    const hideSecret = (u) => (u ? u.replace(/(\/api\/webhook\/).*/, '$1***') : '(не задан)')
     try {
       const [me, hook] = await Promise.all([tg.getMe(), tg.call('getWebhookInfo')])
       const expected = config.publicUrl + config.webhookPath
@@ -139,7 +140,7 @@ export async function handleRequest(req, res) {
       const lines = [
         `бот:                 @${me.username}`,
         `адрес приложения:    ${config.publicUrl}`,
-        `вебхук у Telegram:   ${hideSecret(hook.url)}`,
+        `вебхук у Telegram:   ${hook.url || '(не задан)'}`,
         `совпадает с нашим:   ${hook.url === expected ? 'да' : 'НЕТ — откройте /api/setup'}`,
         `ждут обработки:      ${hook.pending_update_count ?? 0}`,
         `типы обновлений:     ${(hook.allowed_updates || ['(все)']).join(', ')}`,
@@ -161,6 +162,12 @@ export async function handleRequest(req, res) {
 
   // ── Telegram webhook ──────────────────────────────────────────────────────
   if (req.method === 'POST' && path === config.webhookPath) {
+    // Подлинность обновления подтверждает заголовок с секретом, который
+    // Telegram присылает по договорённости из setWebhook.
+    if (req.headers['x-telegram-bot-api-secret-token'] !== config.webhookSecret) {
+      return json(res, 401, { error: 'unauthorized' })
+    }
+
     const body = await readBody(req, 2 * 1024 * 1024)
     let update
     try {

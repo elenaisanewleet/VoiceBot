@@ -19,7 +19,11 @@ test('такой конфигурации хватает для запуска',
   assert.doesNotThrow(() => assertConfig())
 })
 
-test('путь вебхука не угадывается и выведен из токена', () => {
-  assert.match(config.webhookPath, /^\/api\/webhook\/[0-9a-f]{32}$/)
+test('путь вебхука — один сегмент, секрет в него не попадает', () => {
+  // Два сегмента не доезжали до функции на бессерверной площадке: Telegram
+  // получал 404 и ни одно обновление не доходило.
+  assert.equal(config.webhookPath, '/api/webhook')
+  assert.match(config.webhookSecret, /^[0-9a-f]{32}$/)
+  assert.ok(!config.webhookPath.includes(config.webhookSecret))
   assert.ok(!config.webhookPath.includes(config.botToken))
 })

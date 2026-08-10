@@ -39,6 +39,7 @@ async function webhook() {
   const url = config.publicUrl + config.webhookPath
   await tg.call('setWebhook', {
     url,
+    secret_token: config.webhookSecret,
     allowed_updates: ALLOWED_UPDATES,
     max_connections: 40,
   })

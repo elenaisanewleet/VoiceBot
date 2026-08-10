@@ -94,9 +94,10 @@ config.webhookSecret =
   process.env.WEBHOOK_SECRET ||
   createHash('sha256').update(`webhook:${config.botToken}`).digest('hex').slice(0, 32)
 
-// Путь лежит под /api, чтобы бессерверные площадки отдавали его в ту же функцию,
-// что и остальные ручки.
-config.webhookPath = `/api/webhook/${config.webhookSecret}`
+// Один сегмент под /api — так путь доезжает до функции на любой площадке.
+// Секрет в адрес не кладём: у Telegram для этого есть secret_token, который
+// он присылает отдельным заголовком.
+config.webhookPath = '/api/webhook'
 
 export function assertConfig() {
   const problems = []
