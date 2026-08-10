@@ -56,8 +56,11 @@ export async function onInlineQuery(q) {
   const results = []
 
   // Текст мог не влезть в строку запроса — тогда пришёл короткий ключ.
-  const stored = raw.startsWith('#') ? store.get(userId, raw.slice(1)) : null
-  const text = stored?.text ?? raw
+  const byKey = raw.startsWith('#')
+  const stored = byKey ? store.get(userId, raw.slice(1)) : null
+  // Ключ без записи — на бессерверной площадке память между запросами не
+  // живёт. Отправлять в чат сам ключ вместо текста было бы издевательством.
+  const text = byKey ? (stored?.text ?? '') : raw
 
   if (text) {
     results.push({
