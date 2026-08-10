@@ -66,13 +66,24 @@ test('не падает на мусоре вместо hash', () => {
   assert.equal(verifyInitData('auth_date=1&hash=ab', TOKEN).ok, false)
 })
 
-test('игнорирует поле signature при сборке контрольной строки', () => {
-  // Telegram кладёт signature для сторонней валидации; в hash оно не входит.
-  const base = {
+test('signature входит в контрольную строку — так подписывает Telegram', () => {
+  // Именно на этом ломался боевой запуск: поле signature исключалось из
+  // контрольной строки, хотя при проверке по токену бота оно в неё входит.
+  const initData = makeInitData({
     auth_date: String(now()),
-    user: JSON.stringify({ id: 7 }),
-  }
-  const signed = new URLSearchParams(makeInitData(base))
-  signed.set('signature', 'что-угодно')
+    query_id: 'AAH123',
+    user: JSON.stringify({ id: 7, first_name: 'Елена' }),
+    signature: 'Ed25519-подпись-для-сторонней-проверки',
+  })
+  const result = verifyInitData(initData, TOKEN)
+  assert.equal(result.ok, true, result.reason)
+  assert.equal(result.userId, 7)
+})
+
+test('принимает и старые клиенты, где signature не участвует в подписи', () => {
+  // Подписываем без signature, а потом добавляем поле — так вело себя
+  // старое поведение и клиенты до Bot API 7.10.
+  const signed = new URLSearchParams(makeInitData({ auth_date: String(now()), user: '{"id":7}' }))
+  signed.set('signature', 'приписано-после-подписи')
   assert.equal(verifyInitData(signed.toString(), TOKEN).ok, true)
 })

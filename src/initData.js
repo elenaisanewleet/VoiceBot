@@ -17,19 +17,32 @@ export function verifyInitData(initData, botToken, { maxAgeSec = 24 * 60 * 60 } 
   if (!hash) return { ok: false, reason: 'нет hash' }
 
   params.delete('hash')
-  params.delete('signature') // подпись Telegram для third-party валидации, в контрольную строку не входит
 
-  const checkString = [...params.entries()]
-    .map(([k, v]) => `${k}=${v}`)
-    .sort()
-    .join('\n')
+  const checkString = (entries) =>
+    entries
+      .map(([k, v]) => `${k}=${v}`)
+      .sort()
+      .join('\n')
+
+  const entries = [...params.entries()]
+  // При проверке по токену бота в контрольную строку входят все поля, кроме
+  // hash, — включая signature. Исключение signature относится к другому
+  // способу проверки, стороннему, по открытому ключу Telegram. Второй вариант
+  // всё же считаем: клиенты постарше поле signature не присылают вовсе, а
+  // ошибка тут выглядит как «подпись не сходится» и ищется мучительно.
+  const variants = [
+    checkString(entries),
+    checkString(entries.filter(([k]) => k !== 'signature')),
+  ]
 
   const secret = createHmac('sha256', 'WebAppData').update(botToken).digest()
-  const expected = createHmac('sha256', secret).update(checkString).digest('hex')
+  const given = Buffer.from(hash, 'hex')
+  const matches = variants.some((data) => {
+    const expected = Buffer.from(createHmac('sha256', secret).update(data).digest('hex'), 'hex')
+    return expected.length === given.length && timingSafeEqual(expected, given)
+  })
 
-  const a = Buffer.from(expected, 'hex')
-  const b = Buffer.from(hash, 'hex')
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+  if (!matches) {
     // Подпись считается от токена бота, так что расходится она почти всегда
     // по одной причине — в BOT_TOKEN лежит не то, что выдал @BotFather.
     return { ok: false, reason: 'подпись не сходится — проверьте BOT_TOKEN на хостинге' }
