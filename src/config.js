@@ -94,6 +94,10 @@ config.webhookSecret =
   process.env.WEBHOOK_SECRET ||
   createHash('sha256').update(`webhook:${config.botToken}`).digest('hex').slice(0, 32)
 
+// Отдельный секрет для пропусков в окно записи — чтобы утечка одного не
+// раскрывала другое.
+config.appSecret = createHash('sha256').update(`apptoken:${config.botToken}`).digest('hex')
+
 // Один сегмент под /api — так путь доезжает до функции на любой площадке.
 // Секрет в адрес не кладём: у Telegram для этого есть secret_token, который
 // он присылает отдельным заголовком.

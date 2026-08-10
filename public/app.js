@@ -4,10 +4,12 @@
  * Почему именно так:
  *  • Telegram-бот не имеет доступа к микрофону — доступ есть только у веб-страницы
  *    внутри Telegram, то есть у Mini App.
- *  • Mini App открывается кнопкой из inline-режима (@бот в любом чате), поэтому
- *    Telegram кладёт в initData query_id, а бот через answerWebAppQuery кладёт
- *    готовый текст ровно в тот чат, откуда всё началось. Обычным текстовым
- *    сообщением от имени пользователя, без голосовых и без прав в чате.
+ *  • Окно открывается кнопкой из панели (@бот в любом чате) прямо поверх этого
+ *    чата. Данных запуска Telegram такому окну не передаёт, поэтому пропуск
+ *    выписывает наш сервер при ответе на inline-запрос и вшивает в адрес.
+ *  • Готовый текст возвращается в тот же чат через switchInlineQuery — это
+ *    штатный способ вернуться из окна обратно в переписку. Уходит обычным
+ *    текстовым сообщением от имени пользователя, без голосовых.
  */
 
 const tg = window.Telegram?.WebApp
@@ -137,11 +139,21 @@ function appendPhrase(phrase) {
 
 const initData = tg?.initData || ''
 
+// Пропуск, вшитый в адрес кнопки. Нужен, когда окно открыто из панели в чужом
+// чате: там Telegram данных запуска не передаёт, и подтвердить, кто пришёл,
+// больше нечем.
+const appToken = new URLSearchParams(location.search).get('t') || ''
+
+/** Есть чем подтвердить, кто пришёл. */
+const authorized = () => Boolean(initData || appToken)
+
 async function api(path, { body, headers = {}, raw = false } = {}) {
   const res = await fetch(path, {
     method: 'POST',
-    headers: raw ? { 'x-init-data': initData, ...headers } : { 'content-type': 'application/json' },
-    body: raw ? body : JSON.stringify({ initData, ...body }),
+    headers: raw
+      ? { 'x-init-data': initData, 'x-app-token': appToken, ...headers }
+      : { 'content-type': 'application/json' },
+    body: raw ? body : JSON.stringify({ initData, token: appToken, ...body }),
   })
   const data = await res.json().catch(() => ({}))
   // Причина всегда конкретнее общего кода ошибки — показываем её.
@@ -217,7 +229,7 @@ async function startRecording() {
   if (state.recording || state.starting) return
   // Без данных запуска отправлять всё равно некуда, а записанное пропадёт зря.
   // Проверяем до очистки ошибки, иначе объяснение исчезнет с экрана.
-  if (!initData) return showError(`${OUTSIDE_TELEGRAM}\n(${describeLaunch()})`)
+  if (!authorized()) return showError(`${OUTSIDE_TELEGRAM}\n(${describeLaunch()})`)
   showError('')
   const mime = pickMime()
   if (!navigator.mediaDevices?.getUserMedia || mime === null) {
@@ -465,9 +477,28 @@ async function finalize() {
 
 // ── отправка ────────────────────────────────────────────────────────────────
 
+// Текст возвращается в чат через строку inline-запроса, а она у Telegram
+// короткая. Что не влезло — только вручную, для этого есть «Скопировать».
+const INLINE_LIMIT = 240
+
+const TOO_LONG_FOR_INLINE =
+  'Текст длинный — Telegram не пропустит его через строку запроса. ' +
+  'Нажмите «Скопировать» и вставьте в чат вручную.'
+
 async function send() {
   const text = currentText().slice(0, MAX_LEN)
   if (!text || state.sending) return
+
+  // Окно открыто из панели поверх чужого чата: возвращаемся ровно туда же с
+  // готовым текстом. Сервер тут не нужен — Telegram сам вернёт нас в тот чат,
+  // из которого мы пришли, и подставит текст в строку ввода.
+  if (!initData && appToken) {
+    if (text.length > INLINE_LIMIT) return showError(TOO_LONG_FOR_INLINE)
+    if (!tg?.switchInlineQuery) return showError(TOO_LONG_FOR_INLINE)
+    haptic('impact', 'light')
+    tg.switchInlineQuery(text)
+    return
+  }
 
   state.sending = true
   syncMainButton()
@@ -485,7 +516,7 @@ async function send() {
       // Текст едет в строке inline-запроса, а она короткая. Длинный сюда не
       // влезет — тогда честно предлагаем скопировать.
       if (String(result.query).startsWith('#')) {
-        showError('Текст длинный — Telegram не пропустит его через выбор чата. Нажмите «Скопировать» и вставьте в нужный чат.')
+        showError(TOO_LONG_FOR_INLINE)
       } else if (tg?.switchInlineQuery && tg.isVersionAtLeast?.('6.7')) {
         tg.switchInlineQuery(result.query, ['users', 'groups', 'channels'])
       } else {
@@ -607,7 +638,7 @@ function init() {
 
   // Библиотека Telegram грузится на любой странице, поэтому сам по себе объект
   // ничего не доказывает — судим по данным запуска.
-  if (!initData) blockRecording()
+  if (!authorized()) blockRecording()
 
   syncMainButton()
 }

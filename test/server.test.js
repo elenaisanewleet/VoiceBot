@@ -11,6 +11,8 @@ process.env.PORT = '0'
 
 const { startServer } = await import('../src/server.js')
 const { _reset } = await import('../src/store.js')
+const { config } = await import('../src/config.js')
+const { mintToken } = await import('../src/token.js')
 
 const TOKEN = process.env.BOT_TOKEN
 let base
@@ -102,6 +104,30 @@ test('длинный текст уезжает в inline-запрос ключо
 test('пустой текст отклоняется', async () => {
   const res = await post('/api/send', { initData: initDataFor({}), text: '   ' })
   assert.equal(res.status, 400)
+})
+
+test('пропуск из адреса кнопки пускает вместо данных запуска', async () => {
+  _reset()
+  const token = mintToken(777, config.appSecret)
+  const res = await post('/api/draft', { token, text: 'из чужого чата' })
+  assert.equal(res.status, 200)
+  assert.equal((await res.json()).query, 'из чужого чата')
+
+  // Тот же пропуск заголовком — так его шлёт запись голоса, у которой тело
+  // занято звуком.
+  const stt = await fetch(base + '/api/stt', {
+    method: 'POST',
+    headers: { 'x-app-token': token, 'content-type': 'audio/webm' },
+    body: '',
+  })
+  assert.notEqual(stt.status, 401) // пустое аудио — уже другая история
+})
+
+test('поддельный пропуск не пускает', async () => {
+  const [payload] = mintToken(777, config.appSecret).split('.')
+  const res = await post('/api/draft', { token: `${payload}.${'x'.repeat(32)}`, text: 'нет' })
+  assert.equal(res.status, 401)
+  assert.match((await res.json()).reason, /подделан/)
 })
 
 test('draft сохраняет фразу и возвращает ключ', async () => {

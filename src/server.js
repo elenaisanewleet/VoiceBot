@@ -5,6 +5,7 @@ import { dirname, join, normalize } from 'node:path'
 
 import { config } from './config.js'
 import { verifyInitData } from './initData.js'
+import { verifyToken } from './token.js'
 import { speechToText, polish, STYLES } from './stt.js'
 import * as store from './store.js'
 import * as tg from './telegram.js'
@@ -64,9 +65,23 @@ async function readBody(req, limit) {
   return Buffer.concat(chunks)
 }
 
-/** Достаём и проверяем initData; при провале сразу отвечаем 401. */
-function auth(req, res, initDataFromBody) {
-  const initData = initDataFromBody ?? req.headers['x-init-data']
+/**
+ * Кто пришёл. Два равноправных способа подтвердить это:
+ *   • данные запуска от Telegram — когда окно открыто из чата с ботом;
+ *   • наш собственный пропуск — когда окно открыто из панели в чужом чате,
+ *     где Telegram данных запуска не передаёт.
+ * При провале сразу отвечаем 401.
+ */
+function auth(req, res, body = {}) {
+  const token = body.token ?? req.headers['x-app-token']
+  if (token) {
+    const pass = verifyToken(String(token), config.appSecret)
+    if (pass.ok) return { ok: true, userId: pass.userId, queryId: null }
+    json(res, 401, { error: 'unauthorized', reason: pass.reason })
+    return null
+  }
+
+  const initData = body.initData ?? req.headers['x-init-data']
   const result = verifyInitData(String(initData || ''), config.botToken)
   if (!result.ok) {
     json(res, 401, { error: 'unauthorized', reason: result.reason })
@@ -208,7 +223,7 @@ export async function handleRequest(req, res) {
   if (req.method === 'POST' && path === '/api/polish') {
     const body = await readBody(req, 256 * 1024).then((b) => safeJson(b))
     if (!body) return json(res, 400, { error: 'bad json' })
-    const session = auth(req, res, body.initData)
+    const session = auth(req, res, body)
     if (!session) return
 
     const text = String(body.text || '').slice(0, 20_000)
@@ -224,7 +239,7 @@ export async function handleRequest(req, res) {
   if (req.method === 'POST' && path === '/api/send') {
     const body = await readBody(req, 256 * 1024).then((b) => safeJson(b))
     if (!body) return json(res, 400, { error: 'bad json' })
-    const session = auth(req, res, body.initData)
+    const session = auth(req, res, body)
     if (!session) return
 
     const text = String(body.text || '').trim().slice(0, 4096)
@@ -263,7 +278,7 @@ export async function handleRequest(req, res) {
   if (req.method === 'POST' && path === '/api/draft') {
     const body = await readBody(req, 256 * 1024).then((b) => safeJson(b))
     if (!body) return json(res, 400, { error: 'bad json' })
-    const session = auth(req, res, body.initData)
+    const session = auth(req, res, body)
     if (!session) return
     const text = String(body.text || '').trim().slice(0, 4096)
     if (!text) return json(res, 400, { error: 'пустой текст' })
