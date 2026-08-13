@@ -57,61 +57,78 @@ test('на своём сервере памяти достаточно', () => {
   }
 })
 
-test('на Vercel без KV запись недолговечна', () => {
-  const { VERCEL, KV_REST_API_URL, KV_REST_API_TOKEN } = process.env
-  process.env.VERCEL = '1'
-  delete process.env.KV_REST_API_URL
-  delete process.env.KV_REST_API_TOKEN
+// Окружение общее на весь процесс, а тесты идут в одном: не вернёшь как было —
+// соседний тест увидит чужое хранилище и упадёт не по своей вине. Поэтому все
+// имена, влияющие на выбор хранилища, перечислены разом и чистятся разом: с
+// двумя наборами имён (KV_* и UPSTASH_*) забыть одно стало слишком легко.
+const ENV_KEYS = [
+  'VERCEL',
+  'KV_REST_API_URL',
+  'KV_REST_API_TOKEN',
+  'UPSTASH_REDIS_REST_URL',
+  'UPSTASH_REDIS_REST_TOKEN',
+]
+
+async function withEnv(patch, fn) {
+  const saved = ENV_KEYS.map((key) => [key, process.env[key]])
+  for (const key of ENV_KEYS) delete process.env[key]
+  Object.assign(process.env, patch)
   try {
+    return await fn()
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
+const KV_ENV = {
+  VERCEL: '1',
+  KV_REST_API_URL: 'https://example.upstash.io',
+  KV_REST_API_TOKEN: 'AX3sASQgN2Y4',
+}
+
+test('на Vercel без KV запись недолговечна', () =>
+  withEnv({ VERCEL: '1' }, () => {
     assert.equal(usingKv(), false)
     assert.equal(isDurable(), false)
-  } finally {
-    if (VERCEL === undefined) delete process.env.VERCEL
-    else process.env.VERCEL = VERCEL
-    if (KV_REST_API_URL !== undefined) process.env.KV_REST_API_URL = KV_REST_API_URL
-    if (KV_REST_API_TOKEN !== undefined) process.env.KV_REST_API_TOKEN = KV_REST_API_TOKEN
-  }
-})
+  }))
 
-test('на Vercel с KV запись долговечна', () => {
-  const { VERCEL, KV_REST_API_URL, KV_REST_API_TOKEN } = process.env
-  process.env.VERCEL = '1'
-  process.env.KV_REST_API_URL = 'https://example.upstash.io'
-  process.env.KV_REST_API_TOKEN = 'AX3sASQgN2Y4'
-  try {
+test('на Vercel с KV запись долговечна', () =>
+  withEnv(KV_ENV, () => {
     assert.equal(usingKv(), true)
     assert.equal(isDurable(), true)
-  } finally {
-    if (VERCEL === undefined) delete process.env.VERCEL
-    else process.env.VERCEL = VERCEL
-    if (KV_REST_API_URL === undefined) delete process.env.KV_REST_API_URL
-    else process.env.KV_REST_API_URL = KV_REST_API_URL
-    if (KV_REST_API_TOKEN === undefined) delete process.env.KV_REST_API_TOKEN
-    else process.env.KV_REST_API_TOKEN = KV_REST_API_TOKEN
-  }
-})
+  }))
 
-test('отказ KV не теряет фразу — падаем в память', async () => {
-  const { VERCEL, KV_REST_API_URL, KV_REST_API_TOKEN } = process.env
-  const realFetch = globalThis.fetch
-  process.env.VERCEL = '1'
-  process.env.KV_REST_API_URL = 'https://example.upstash.io'
-  process.env.KV_REST_API_TOKEN = 'AX3sASQgN2Y4'
-  globalThis.fetch = async () => {
-    throw new Error('сеть недоступна')
-  }
-  _reset()
-  try {
-    const entry = await remember(7, 'фраза')
-    assert.ok(entry, 'запись должна вернуться, даже когда KV молчит')
-    assert.equal(entry.text, 'фраза')
-  } finally {
-    globalThis.fetch = realFetch
-    if (VERCEL === undefined) delete process.env.VERCEL
-    else process.env.VERCEL = VERCEL
-    if (KV_REST_API_URL === undefined) delete process.env.KV_REST_API_URL
-    else process.env.KV_REST_API_URL = KV_REST_API_URL
-    if (KV_REST_API_TOKEN === undefined) delete process.env.KV_REST_API_TOKEN
-    else process.env.KV_REST_API_TOKEN = KV_REST_API_TOKEN
-  }
-})
+// Интеграция Upstash из Marketplace называет переменные по-своему. Промах здесь
+// не ломает бота, а тихо отключает длинный текст — снаружи всё выглядит целым,
+// поэтому проверяем оба набора имён, а не только тот, что был первым.
+test('имена от Marketplace тоже включают KV', () =>
+  withEnv(
+    {
+      VERCEL: '1',
+      UPSTASH_REDIS_REST_URL: 'https://example.upstash.io',
+      UPSTASH_REDIS_REST_TOKEN: 'AX3sASQgN2Y4',
+    },
+    () => {
+      assert.equal(usingKv(), true)
+      assert.equal(isDurable(), true)
+    },
+  ))
+
+test('отказ KV не теряет фразу — падаем в память', () =>
+  withEnv(KV_ENV, async () => {
+    const realFetch = globalThis.fetch
+    globalThis.fetch = async () => {
+      throw new Error('сеть недоступна')
+    }
+    _reset()
+    try {
+      const entry = await remember(7, 'фраза')
+      assert.ok(entry, 'запись должна вернуться, даже когда KV молчит')
+      assert.equal(entry.text, 'фраза')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }))

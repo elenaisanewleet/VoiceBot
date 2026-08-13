@@ -8,8 +8,8 @@
  * Память процесса для этого годится только на своём сервере. На бессерверной
  * площадке каждый запрос — новый процесс: пока человек говорит и пока выбирает
  * чат, это разные запуски, и записанное первым второй уже не видит. Поэтому,
- * если заданы KV_REST_API_URL и KV_REST_API_TOKEN (их проставляет Vercel при
- * подключении Upstash Redis), храним во внешнем KV, а без них — как раньше,
+ * если Vercel проставил переменные подключённого Upstash Redis (KV_REST_API_*
+ * или UPSTASH_REDIS_REST_*), храним во внешнем KV, а без них — как раньше,
  * в памяти. Расшифровки чужой речи живут час и на диск не ложатся.
  */
 const TTL_MS = 60 * 60 * 1000
@@ -22,8 +22,13 @@ let counter = 0
 
 const nextId = () => `t${Date.now().toString(36)}${(counter++).toString(36)}`
 
-const kvUrl = () => (process.env.KV_REST_API_URL || '').replace(/\/+$/, '')
-const kvToken = () => process.env.KV_REST_API_TOKEN || ''
+// Имена переменных зависят от того, как подключено хранилище: интеграция Upstash
+// из Marketplace заводит UPSTASH_REDIS_REST_*, прежнее Vercel KV — KV_REST_API_*.
+// Принимаем оба: промах именем не ломает бота, а тихо отключает длинный текст —
+// такое ищут долго, потому что снаружи всё выглядит исправным.
+const kvUrl = () =>
+  (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '')
+const kvToken = () => process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || ''
 export const usingKv = () => Boolean(kvUrl() && kvToken())
 
 /**
