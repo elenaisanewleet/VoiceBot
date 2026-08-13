@@ -158,7 +158,7 @@ function syncMainButton() {
   if (!tg?.MainButton) return
   const text = currentText()
   if (text && !state.recording) {
-    tg.MainButton.setText(state.sending ? 'Отправляю…' : 'Отправить')
+    tg.MainButton.setText(state.sending ? 'Готовлю…' : 'Вставить в чат')
     tg.MainButton.show()
     if (state.sending || state.busy) tg.MainButton.disable()
     else tg.MainButton.enable()
@@ -594,6 +594,21 @@ async function copyText(text) {
   return false
 }
 
+/**
+ * Прячем длинный текст на сервере и получаем короткий ключ для строки запроса.
+ * Сервер отвечает `id: null`, если хранилище не переживёт соседний запрос, —
+ * тогда честнее отправить человека в буфер обмена, чем показать ему `#ключ`.
+ */
+async function stash(text) {
+  try {
+    const { id } = await api('/api/stash', { body: { text } })
+    return id || null
+  } catch (err) {
+    console.error('stash', err)
+    return null
+  }
+}
+
 async function send() {
   const text = currentText().slice(0, MAX_LEN)
   if (!text) return
@@ -605,7 +620,14 @@ async function send() {
     return
   }
 
-  if (text.length > INLINE_LIMIT) return showError(TOO_LONG_FOR_INLINE)
+  // Длинный текст в строку запроса не влезает: отдаём его серверу и вставляем
+  // короткий ключ — бот подставит по нему полный текст, вплоть до 4096.
+  let query = text
+  if (text.length > INLINE_LIMIT) {
+    const id = await stash(text)
+    if (!id) return showError(TOO_LONG_FOR_INLINE)
+    query = `#${id}`
+  }
 
   // Текст всегда возвращаем через строку ввода — сервер тут не нужен.
   //
@@ -617,10 +639,10 @@ async function send() {
     haptic('impact', 'light')
     if (initData) {
       // Открыто из чата с ботом — куда отправлять, знает только человек.
-      tg.switchInlineQuery(text, ['users', 'groups', 'channels'])
+      tg.switchInlineQuery(query, ['users', 'groups', 'channels'])
     } else {
       // Открыто из панели поверх чужого чата — возвращаемся ровно туда же.
-      tg.switchInlineQuery(text)
+      tg.switchInlineQuery(query)
     }
   } catch (err) {
     // Старый клиент или выключённый inline-режим — путь через буфер остаётся.

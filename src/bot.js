@@ -12,8 +12,8 @@ const HELP =
   '1. В любом чате наберите в поле ввода @%USERNAME% и пробел.\n' +
   '2. Над клавиатурой появится кнопка «🎙 Говорить» — нажмите её.\n' +
   '3. Говорите. Текст пишется на глазах, пунктуация и падежи — на мне.\n' +
-  '4. «Отправить» — текст подставится в поле ввода этого же чата, ' +
-  'останется нажать на подсказку сверху.\n\n' +
+  '4. «Вставить в чат» — текст ляжет в поле ввода этого же чата, ' +
+  'останется нажать на подсказку сверху: этот тап и есть отправка.\n\n' +
   'Сообщение уходит обычным текстом от вашего имени. Бота никуда добавлять не ' +
   'нужно, права в чате не нужны, собеседник ничего не настраивает.\n\n' +
   'Telegram помечает всё отправленное через строку с именем бота: «с помощью ' +
@@ -89,7 +89,7 @@ export async function onInlineQuery(q) {
 
   // Текст мог не влезть в строку запроса — тогда пришёл короткий ключ.
   const byKey = raw.startsWith('#')
-  const stored = byKey ? store.get(userId, raw.slice(1)) : null
+  const stored = byKey ? await store.get(userId, raw.slice(1)) : null
   // Ключ без записи — на бессерверной площадке память между запросами не
   // живёт. Отправлять в чат сам ключ вместо текста было бы издевательством.
   const text = byKey ? (stored?.text ?? '') : raw
@@ -103,7 +103,7 @@ export async function onInlineQuery(q) {
       input_message_content: { message_text: text },
     })
   } else {
-    for (const entry of store.recent(userId)) {
+    for (const entry of await store.recent(userId)) {
       results.push({
         type: 'article',
         id: entry.id,
@@ -167,7 +167,7 @@ export async function onMessage(msg) {
 
   // Любой другой текст в личке — это, скорее всего, попытка что-то отправить:
   // сохраним и дадим кнопку пересылки.
-  const entry = store.remember(userId, text)
+  const entry = await store.remember(userId, text)
   await tg.sendMessage(chatId, 'Готово. Куда отправить?', {
     reply_markup: { inline_keyboard: [[sendToChatButton(entry)]] },
   })
@@ -190,7 +190,7 @@ async function handleVoice(msg, audio) {
       return
     }
 
-    const entry = store.remember(userId, text)
+    const entry = await store.remember(userId, text)
     const parts = chunk(text)
     for (let i = 0; i < parts.length; i++) {
       const isLast = i === parts.length - 1
