@@ -157,6 +157,15 @@ export async function handleRequest(req, res) {
       const [me, hook] = await Promise.all([tg.getMe(), tg.call('getWebhookInfo')])
       const expected = config.publicUrl + config.webhookPath
       const when = (ts) => (ts ? new Date(ts * 1000).toISOString() : '—')
+
+      // Хранилище легко подключить «не то»: у Vercel в списке есть и обычный
+      // Redis, который отдаёт TCP-строку, а мы ходим обычным fetch и умеем
+      // только REST. Промах ничем себя не выдаёт, поэтому называем найденные
+      // переменные — по именам сразу видно, что подключено. Только имена:
+      // значения здесь секретны, а страница открыта всем.
+      const storageEnv = Object.keys(process.env)
+        .filter((name) => /REDIS|UPSTASH|^KV_|^STORAGE_/.test(name))
+        .sort()
       const lines = [
         `бот:                 @${me.username}`,
         `адрес приложения:    ${config.publicUrl}`,
@@ -179,6 +188,13 @@ export async function handleRequest(req, res) {
               ? 'целиком, до 4096 (хранилище Upstash на месте)'
               : 'целиком, до 4096 (память процесса — свой сервер)'
         }`,
+        ...(store.usingKv() || !storageEnv.length
+          ? []
+          : [
+              `хранилище видит:     ${storageEnv.join(', ')}`,
+              'но подключено не то: нужен Upstash с REST-доступом — он даёт',
+              'адрес на https:// и токен, а обычный Redis только redis://',
+            ]),
         `последняя ошибка:    ${hook.last_error_message || 'нет'}`,
         `когда:               ${when(hook.last_error_date)}`,
       ]
