@@ -10,7 +10,7 @@ const CLEAN_TOKEN = '123456:TEST-TOKEN-abcdef'
 process.env.BOT_TOKEN = `  ${CLEAN_TOKEN}\n`
 process.env.STT_API_KEY = ' gsk_test \n'
 process.env.STT_BASE_URL = ' https://api.groq.com/openai/v1 '
-process.env.PUBLIC_URL = 'https://139bot.example'
+process.env.PUBLIC_URL = 'https://voicebot.example'
 
 const { config } = await import('../src/config.js')
 const { verifyInitData } = await import('../src/initData.js')

@@ -5,14 +5,14 @@ import assert from 'node:assert/strict'
 // Публичный адрес не задаём: проверяем, что он подхватится с хостинга.
 process.env.BOT_TOKEN = '123456:TEST-TOKEN'
 process.env.STT_API_KEY = 'test-key'
-process.env.RENDER_EXTERNAL_URL = 'https://139bot.onrender.com/'
+process.env.RENDER_EXTERNAL_URL = 'https://voicebot.onrender.com/'
 delete process.env.PUBLIC_URL
 
 const { config, assertConfig } = await import('../src/config.js')
 
 test('адрес подхватывается с хостинга, если PUBLIC_URL не задан', () => {
-  assert.equal(config.publicUrl, 'https://139bot.onrender.com')
-  assert.equal(config.miniAppUrl, 'https://139bot.onrender.com/')
+  assert.equal(config.publicUrl, 'https://voicebot.onrender.com')
+  assert.equal(config.miniAppUrl, 'https://voicebot.onrender.com/')
 })
 
 test('такой конфигурации хватает для запуска', () => {
