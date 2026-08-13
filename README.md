@@ -128,8 +128,8 @@ brew install node cloudflared
 **Дальше:**
 
 ```bash
-git clone https://github.com/elenaisanewleet/139bot.git
-cd 139bot
+git clone https://github.com/elenaisanewleet/VoiceBot.git
+cd VoiceBot
 npm run setup     # спросит токен, ключ и язык, всё проверит и запишет .env
 npm run dev       # поднимет туннель и запустит бота
 ```
