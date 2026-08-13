@@ -8,6 +8,7 @@ import { verifyInitData } from './initData.js'
 import { verifyToken } from './token.js'
 import { speechToText, polish, STYLES } from './stt.js'
 import * as tg from './telegram.js'
+import * as store from './store.js'
 import { handleUpdate, bootstrap } from './bot.js'
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
@@ -237,6 +238,24 @@ export async function handleRequest(req, res) {
     } catch (err) {
       return json(res, 200, { text }) // не теряем сказанное
     }
+  }
+
+  // Длинный текст в строку ввода не влезает — Telegram режет inline-запрос на
+  // 256 символах. Поэтому кладём текст сюда и отдаём короткий ключ: в строку
+  // уйдёт `#ключ`, а в чат — полный текст, который бот подставит по ключу.
+  if (req.method === 'POST' && path === '/api/stash') {
+    const session = auth(req, res, body)
+    if (!session) return
+
+    const text = String(body.text || '').slice(0, 4096)
+    if (!text.trim()) return json(res, 400, { error: 'empty' })
+
+    // Без внешнего KV на бессерверной площадке запись не переживёт соседний
+    // запрос — честно говорим «нет», чтобы клиент ушёл в буфер обмена.
+    if (!store.isDurable()) return json(res, 200, { id: null, reason: 'no-store' })
+
+    const entry = await store.remember(session.userId, text)
+    return json(res, 200, { id: entry?.id ?? null })
   }
 
   // Отправки на сервере нет намеренно. Единственный способ отдать текст в чат
