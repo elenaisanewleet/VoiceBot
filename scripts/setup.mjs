@@ -214,7 +214,7 @@ async function main() {
   console.log(green('\n✓ Файл .env записан.\n'))
   console.log(bold('Что осталось сделать один раз:'))
   console.log(`   1. В @BotFather выполните ${bold('/setinline')}, выберите ${username ? '@' + username : 'вашего бота'}`)
-  console.log(dim('      и задайте подсказку, например: Говорите — превращу в текст'))
+  console.log(dim('      и задайте подсказку, например: Говорите — отправлю текстом'))
   console.log(dim('      Без этого @бот в чужих чатах работать не будет.\n'))
   console.log(`   2. Запустите: ${bold('npm run dev')}`)
   console.log(dim('      Команда сама поднимет https-туннель и пропишет адрес в .env.\n'))
