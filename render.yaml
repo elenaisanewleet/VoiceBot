@@ -2,7 +2,7 @@
 # Бесплатный план, карта не нужна.
 services:
   - type: web
-    name: 139bot
+    name: voicebot
     runtime: node
     plan: free
     region: frankfurt
