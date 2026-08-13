@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Ава бота = кнопка записи из Mini App: тот же глиф микрофона (public/index.html)
+       и тот же акцент #2f86ff (public/style.css). Человек видит в списке чатов ровно
+       то, что потом нажимает, — узнавание бесплатное. Ни текста, ни мелких деталей:
+       в списке чатов кружок размером с ноготь.
+
+       Правится здесь, а не в готовой картинке: Telegram просит растр, и PNG под
+       @BotFather /setuserpic пересобирается из этого файла любым конвертером —
+       например `rsvg-convert -w 1024 -h 1024 brand/icon.svg -o avatar.png`.
+       Микрофон умещается в круг с запасом, так что обрезка аватара его не режет. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#57a0ff"/>
+      <stop offset="1" stop-color="#1f6fe5"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="34%" r="62%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+
+  <g transform="translate(100 100) scale(13)" fill="#ffffff">
+    <path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
+    <path d="M18.5 11.5a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20h-2a.9.9 0 0 0 0 1.8h5.8a.9.9 0 0 0 0-1.8h-2v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/>
+  </g>
+</svg>
