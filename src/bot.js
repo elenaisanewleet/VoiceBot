@@ -2,6 +2,7 @@ import { config } from './config.js'
 import * as tg from './telegram.js'
 import * as store from './store.js'
 import { speechToText } from './stt.js'
+import { translateText } from './translate.js'
 import { mintToken } from './token.js'
 
 const MAX_MESSAGE = 4096
@@ -162,6 +163,25 @@ export async function onMessage(msg) {
           : [[micButton(userId)]],
       },
     })
+    return
+  }
+
+  // Китайский текст, отправленный или пересланный боту в личные сообщения:
+  // возвращаем перевод, не пытаясь читать чужие приватные чаты.
+  if (msg.chat?.type === 'private' && /[\u3400-\u9fff]/u.test(text)) {
+    try {
+      const translated = await translateText(text, 'ru')
+      const entry = await store.remember(userId, translated)
+      await tg.sendMessage(chatId, '🇷🇺 Перевод:\\n' + translated, {
+        reply_to_message_id: msg.message_id,
+        reply_markup: { inline_keyboard: [[sendToChatButton(entry)]] },
+      })
+    } catch (err) {
+      console.warn('[translate incoming]', err.message)
+      await tg.sendMessage(chatId, 'Не удалось перевести: ' + err.message, {
+        reply_to_message_id: msg.message_id,
+      })
+    }
     return
   }
 
