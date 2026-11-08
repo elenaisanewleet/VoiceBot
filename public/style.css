@@ -308,3 +308,44 @@ body {
     transition: none !important;
   }
 }
+
+/* ── переводчик ───────────────────────────────────────────────────────────── */
+.translator {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.translator__header, .translator__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.translator__header { margin-bottom: 10px; }
+.translator__title { font-size: 15px; font-weight: 600; }
+.translator__actions { justify-content: flex-start; flex-wrap: wrap; }
+.translate-btn {
+  padding: 9px 15px;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+  cursor: pointer;
+}
+.translate-btn:disabled { opacity: .5; cursor: wait; }
+.translator__original {
+  border-top: 1px solid color-mix(in srgb, var(--muted) 22%, transparent);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+.translator__caption { font-size: 12px; color: var(--muted); }
+.translator__original p {
+  margin: 5px 0 0;
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
