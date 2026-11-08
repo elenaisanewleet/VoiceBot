@@ -7,6 +7,7 @@ import { config } from './config.js'
 import { verifyInitData } from './initData.js'
 import { verifyToken } from './token.js'
 import { speechToText, polish, STYLES } from './stt.js'
+import { translateText, TRANSLATION_TARGETS } from './translate.js'
 import * as tg from './telegram.js'
 import * as store from './store.js'
 import { handleUpdate, bootstrap } from './bot.js'
@@ -263,6 +264,30 @@ export async function handleRequest(req, res) {
       return json(res, 200, { text: await polish(text, { style: pickStyle(body.style) }) })
     } catch (err) {
       return json(res, 200, { text }) // не теряем сказанное
+    }
+  }
+
+  // ── перевод текста из Mini App (только с подтверждённой сессией) ────────
+  if (req.method === 'POST' && path === '/api/translate') {
+    const body = await readBody(req, 32 * 1024).then((b) => safeJson(b))
+    if (!body) return json(res, 400, { error: 'bad json' })
+    const session = auth(req, res, body)
+    if (!session) return
+
+    const text = String(body.text || '').trim()
+    const target = String(body.target || '')
+    if (!TRANSLATION_TARGETS.includes(target)) {
+      return json(res, 400, { error: 'Укажите язык перевода: ru, zh или en' })
+    }
+    if (!text || text.length > 4096) {
+      return json(res, 400, { error: 'Длина текста должна быть от 1 до 4096 символов' })
+    }
+
+    try {
+      return json(res, 200, { text: await translateText(text, target) })
+    } catch (err) {
+      console.error('[translate]', err)
+      return json(res, 502, { error: err.message })
     }
   }
 
