@@ -47,6 +47,25 @@
         </div>
       </section>
 
+      <section class="translator" aria-label="Перевод сообщений">
+        <div class="translator__header">
+          <span class="translator__title">Переводчик</span>
+          <select id="translateTarget" class="select" aria-label="Перевести на язык">
+            <option value="zh">На китайский</option>
+            <option value="ru">На русский</option>
+            <option value="en">На английский</option>
+          </select>
+        </div>
+        <div class="translator__actions">
+          <button id="translate" class="translate-btn" type="button">Перевести текст</button>
+          <button id="restoreOriginal" class="linkbtn" type="button" hidden>Вернуть оригинал</button>
+        </div>
+        <div id="originalSection" class="translator__original" hidden>
+          <span class="translator__caption">Исходный текст</span>
+          <p id="originalText"></p>
+        </div>
+      </section>
+
       <section class="settings" id="settings">
         <div class="row">
           <span class="row__label">Стиль</span>
@@ -62,6 +81,7 @@
           <select id="lang" class="select">
             <option value="">определить сам</option>
             <option value="ru">русский</option>
+            <option value="zh">中文</option>
             <option value="en">english</option>
             <option value="uk">українська</option>
             <option value="de">deutsch</option>
