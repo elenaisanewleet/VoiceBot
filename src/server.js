@@ -295,6 +295,8 @@ export async function handleRequest(req, res) {
   // 256 символах. Поэтому кладём текст сюда и отдаём короткий ключ: в строку
   // уйдёт `#ключ`, а в чат — полный текст, который бот подставит по ключу.
   if (req.method === 'POST' && path === '/api/stash') {
+    const body = await readBody(req, 16 * 1024).then((b) => safeJson(b))
+    if (!body) return json(res, 400, { error: 'bad json' })
     const session = auth(req, res, body)
     if (!session) return
 
