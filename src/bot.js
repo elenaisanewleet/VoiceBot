@@ -172,7 +172,7 @@ export async function onMessage(msg) {
     try {
       const translated = await translateText(text, 'ru')
       const entry = await store.remember(userId, translated)
-      await tg.sendMessage(chatId, '🇷🇺 Перевод:\\n' + translated, {
+      await tg.sendMessage(chatId, '🇷🇺 Перевод:\n' + translated, {
         reply_to_message_id: msg.message_id,
         reply_markup: { inline_keyboard: [[sendToChatButton(entry)]] },
       })
