@@ -32,6 +32,11 @@ const el = {
   browser: document.getElementById('browser'),
   styles: document.getElementById('styles'),
   lang: document.getElementById('lang'),
+  translate: document.getElementById('translate'),
+  translateTarget: document.getElementById('translateTarget'),
+  restoreOriginal: document.getElementById('restoreOriginal'),
+  originalSection: document.getElementById('originalSection'),
+  originalText: document.getElementById('originalText'),
   error: document.getElementById('error'),
 }
 
@@ -46,7 +51,7 @@ const MOBILE = PLATFORM === 'ios' || PLATFORM === 'android'
 
 // ── настройки ───────────────────────────────────────────────────────────────
 
-const DEFAULTS = { style: 'clean', lang: 'ru' }
+const DEFAULTS = { style: 'clean', lang: 'ru', translateTarget: 'zh' }
 // Имя ключа осталось от первого названия проекта и переименованию не подлежит:
 // под ним в браузере уже лежат чужие настройки, а сменить его — молча сбросить
 // всем язык и стиль. Видит его только localStorage, человеку он не показывается.
@@ -96,6 +101,10 @@ const state = {
   pending: 0, // сколько кусков ещё распознаётся
   sending: false,
 }
+
+// Исходный текст сохраняем только в открытом окне, не в базе и не в логах.
+let originalBeforeTranslation = null
+let translatedSnapshot = null
 
 // ── мелкие утилиты ──────────────────────────────────────────────────────────
 
@@ -564,6 +573,49 @@ async function finalize() {
   }
 }
 
+// ── перевод сообщения перед отправкой ──────────────────────────────────────
+
+async function translateCurrent() {
+  if (state.recording || state.pending || state.busy) {
+    return showError('Завершите запись или дождитесь обработки текста.')
+  }
+  // При смене языка переводим исходную реплику, а не перевод предыдущего перевода.
+  const current = currentText()
+  const source = translatedSnapshot === current && originalBeforeTranslation
+    ? originalBeforeTranslation
+    : current
+  if (!source) return showError('Сначала введите текст или запишите голосовое.')
+
+  state.busy = true
+  el.translate.disabled = true
+  el.restoreOriginal.disabled = true
+  setHint('перевожу', true)
+  showError('')
+  syncMainButton()
+  try {
+    const { text } = await api('/api/translate', {
+      body: { text: source, target: settings.translateTarget },
+    })
+    if (!text) throw new Error('Сервис вернул пустой перевод')
+    originalBeforeTranslation = source
+    translatedSnapshot = text
+    el.text.value = text
+    el.originalText.textContent = source
+    el.originalSection.hidden = false
+    el.restoreOriginal.hidden = false
+    setHint('перевод готов — проверьте и отправьте')
+    setStatus('Перевод готов — проверьте текст перед отправкой')
+  } catch (err) {
+    showError('Перевод не удался: ' + err.message)
+    setHint('')
+  } finally {
+    state.busy = false
+    el.translate.disabled = false
+    el.restoreOriginal.disabled = false
+    syncMainButton()
+  }
+}
+
 // ── отправка ────────────────────────────────────────────────────────────────
 
 // Текст возвращается в чат через строку inline-запроса, а она у Telegram
@@ -663,6 +715,24 @@ el.mic.addEventListener('click', () => {
 
 el.text.addEventListener('input', syncMainButton)
 
+el.translate.addEventListener('click', translateCurrent)
+
+el.restoreOriginal.addEventListener('click', () => {
+  if (originalBeforeTranslation === null || state.busy || state.recording) return
+  el.text.value = originalBeforeTranslation
+  originalBeforeTranslation = null
+  translatedSnapshot = null
+  el.originalSection.hidden = true
+  el.restoreOriginal.hidden = true
+  setHint('исходный текст восстановлен')
+  syncMainButton()
+})
+
+el.translateTarget.addEventListener('change', () => {
+  settings.translateTarget = el.translateTarget.value
+  saveSettings()
+})
+
 el.copy.addEventListener('click', async () => {
   const text = currentText()
   if (!text) return
@@ -695,6 +765,10 @@ document.addEventListener('keydown', (e) => {
 
 el.clear.addEventListener('click', () => {
   el.text.value = ''
+  originalBeforeTranslation = null
+  translatedSnapshot = null
+  el.originalSection.hidden = true
+  el.restoreOriginal.hidden = true
   // Куски, уехавшие на распознавание до очистки, уже неактуальны:
   // сдвигаем очередь вперёд, и deliver() их отбросит.
   queue.next = rec.segmentIndex
@@ -726,6 +800,7 @@ function renderSettings() {
     pill.setAttribute('aria-checked', String(active))
   }
   el.lang.value = settings.lang
+  el.translateTarget.value = settings.translateTarget
 }
 
 // ── старт ───────────────────────────────────────────────────────────────────
